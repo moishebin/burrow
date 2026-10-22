@@ -8,6 +8,7 @@ mod clipboard;
 mod consts;
 mod ext_bridge;
 mod external;
+mod notify;
 mod paths;
 mod scheme;
 mod switches;

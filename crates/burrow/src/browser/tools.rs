@@ -77,6 +77,9 @@ impl Burrow {
         if tool == "picture_in_picture" {
             return self.agent_pip(&args, done);
         }
+        if tool == "notifications" {
+            return self.agent_notifications(&args, done);
+        }
         if tool == "update" {
             return self.agent_update(&args, done);
         }

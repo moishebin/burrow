@@ -1003,6 +1003,10 @@ function addMenu(e) {
     { label: "Search Engine…", action: searchDialog },
     { label: "Auto-Archive…", action: archiveDialog },
     {
+      label: view.state.settings.notifications ? "Turn Off Website Notifications" : "Turn On Website Notifications",
+      action: () => act("set_notifications", { on: !view.state.settings.notifications }),
+    },
+    {
       label: view.state.settings.auto_pip ? "Turn Off Auto Picture in Picture" : "Turn On Auto Picture in Picture",
       action: () => act("set_auto_pip", { on: !view.state.settings.auto_pip }),
     },

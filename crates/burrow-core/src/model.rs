@@ -106,6 +106,9 @@ pub struct Settings {
     /// Check for new versions on GitHub after starting and every six hours (D-037).
     #[serde(default = "yes")]
     pub auto_update: bool,
+    /// Websites' notifications show as system notifications (D-042).
+    #[serde(default = "yes")]
+    pub notifications: bool,
 }
 
 pub const SIDEBAR_WIDTH_DEFAULT: u32 = 264;
@@ -141,6 +144,7 @@ impl Default for Settings {
             sidebar_width: SIDEBAR_WIDTH_DEFAULT,
             auto_pip: true,
             auto_update: true,
+            notifications: true,
         }
     }
 }

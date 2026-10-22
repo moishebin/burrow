@@ -29,7 +29,7 @@ Priority: **P0** = needed to switch from Arc · P1 = soon after · P2 = later
 | Look and feel: space-tinted sidebar, content card, frameless window | ✅ | D-013. Dragging and resizing the frameless window not yet checked by hand. |
 | Window buttons hidden in the top-right corner until hovered (Arc for Windows) | ✅ | D-035. Verified on Xvfb with real mouse moves. Agent tool `window`. |
 | Dialogs (History, Extensions, Air Traffic Control, settings…) centered over the window | ✅ | D-039. Were squeezed into the sidebar. Verified on Xvfb with real input. |
-| Picture in picture for every video; auto when leaving a playing tab (Arc) | ✅ | D-036. Chromium's own floating window. Verified on Xvfb: auto on tab switch, back on return, "back to tab", close, Ctrl+Shift+P. Videos inside iframes not yet. Agent tool `picture_in_picture`. |
+| Picture in picture for every video; auto when leaving a playing tab (Arc) | ✅ | D-036. Chromium's own floating window. Verified on Xvfb: auto on tab switch, back on return, "back to tab", close, Ctrl+Shift+P; the floating window also opens on Windows (D-043). Videos inside iframes not yet. Agent tool `picture_in_picture`. |
 | Camera / mic / notification permission prompts | ✅ | D-014. Verified the allow-and-remember flow. |
 | Page context menu: open link in new tab, copy link, search | ✅ | D-014 |
 | App icon (window/taskbar) | ✅ | `scripts/make-icon.py` |
@@ -60,13 +60,13 @@ Priority: **P0** = needed to switch from Arc · P1 = soon after · P2 = later
 | Peek / little browser for links from pinned tabs | ✅ | D-022 |
 | Split view | ✅ | Two tabs (D-026). Drag the divider to resize, double-click for halves (D-038). |
 | Password saving / autofill | 🟡 | Alloy has no built-in password UI (D-010). A password manager extension works (Bitwarden's popup verified, D-032); no built-in manager. |
-| Default-browser registration on Windows | 🟡 | D-024. + → Make Burrow Your Default Browser… writes per-user registry entries and opens Settings. Links hand over to a running Burrow (verified on Linux, and on Windows with the 0.0.2 installer, D-031). The registry part isn't checked by hand yet. |
-| Installer + auto-update | 🟡 | Windows setup .exe: per-user, Start menu, *Settings → Apps* uninstall, updates in place (D-030). Verified install/upgrade/uninstall on Windows. Zip and Linux archive too (D-020); the zip runs on a clean PC (D-029). Not code-signed yet (ready via `BURROW_SIGN`). Auto-update: D-037. |
+| Default-browser registration on Windows | 🟡 | D-024. The `reg add` quoting checked on Windows (D-043). + → Make Burrow Your Default Browser… writes per-user registry entries and opens Settings. Links hand over to a running Burrow (verified on Linux, and on Windows with the 0.0.2 installer, D-031). The registry part isn't checked by hand yet. |
+| Installer + auto-update | 🟡 | Windows setup .exe: per-user, Start menu, *Settings → Apps* uninstall, updates in place (D-030). Verified install/upgrade/uninstall on Windows. Zip and Linux archive too (D-020); the zip runs on a clean PC (D-029). Not code-signed yet (ready via `BURROW_SIGN`). Auto-update (D-037): verified end to end on Windows (D-043). |
 | Launching Burrow again focuses the running window | ✅ | D-029. Verified on Windows: restores a minimized window, no second window. |
 | Exe file icon (Explorer) | ✅ | `build.rs` + embed-resource (llvm-rc) |
 | Zoom indicator, per-site zoom memory | ✅ | D-026 |
 | History page | ✅ | A History list in the sidebar (Ctrl+H), D-023 |
-| Notifications shown as Windows toasts | ⬜ | Permission prompt exists; Alloy may not deliver toasts |
+| Notifications shown as Windows toasts | ✅ | D-042. Chromium dropped them in Alloy tabs; Burrow catches them in the page and shows its own toasts. Verified on Windows (the toast reached Windows); clicking a toast verified on Linux only. Agent tool `notifications`. |
 | **Agent control** (MCP server, CLI, local API): tabs, spaces, folders, read/screenshot/click/type in any tab | ✅ | D-018. Verified on Linux/Xvfb: background tabs read, screenshotted, clicked and typed into while the user's tab stays shown; MCP over stdio; auth/Origin/Host checks. Page tools can be switched off; tab and space tools always work (D-019). Boosts, history, split view, Peek, zoom, mute, duplicate, Air Traffic Control and link settings too (D-028). Windows exe verified as a client from WSL; the server side on Windows is not yet checked by hand. |
 
 ## P2

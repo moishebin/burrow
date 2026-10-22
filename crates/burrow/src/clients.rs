@@ -400,6 +400,10 @@ wrap_display_handler! {
         ) -> ::std::os::raw::c_int {
             let Some(id) = id_of(browser) else { return 0 };
             let msg = string(message);
+            if let Some(note) = browser::parse_note(&msg) {
+                browser::later(move |b| b.on_web_notification(id, note));
+                return 1;
+            }
             if let Some(tab) = browser::helper_tab_id(&msg) {
                 browser::later(move |b| b.on_extension_tab_id(id, tab));
                 return 1;
@@ -436,6 +440,14 @@ wrap_display_handler! {
 wrap_load_handler! {
     struct ContentLoad {}
     impl LoadHandler {
+        /// Every page gets Burrow's `Notification` before its own scripts run (D-042).
+        fn on_load_start(&self, _browser: Option<&mut Browser>, frame: Option<&mut Frame>, _transition_type: TransitionType) {
+            if let Some(frame) = frame {
+                let url = CefString::from(&frame.url());
+                frame.execute_java_script(Some(&CefString::from(browser::notification_script())), Some(&url), 0);
+            }
+        }
+
         fn on_loading_state_change(
             &self,
             browser: Option<&mut Browser>,

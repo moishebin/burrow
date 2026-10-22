@@ -324,6 +324,19 @@ pub const TOOLS: &[Tool] = &[
         },
     },
     Tool {
+        name: "notifications",
+        description: "Websites' notifications, which Burrow shows as system notifications. list = the latest ones, newest first (title, text, site, tab); open = what clicking one does: shows its tab and tells the page (index, default 0 = newest; only when the user asks); enable / disable = show them or not.",
+        schema: || {
+            object(
+                json!({
+                    "action": { "type": "string", "enum": ["list", "open", "enable", "disable"], "description": "Default list." },
+                    "index": { "type": "integer", "minimum": 0, "description": "For open: which one, 0 = newest." }
+                }),
+                &[],
+            )
+        },
+    },
+    Tool {
         name: "update",
         description: "Burrow's own updates. status = the running version and any newer release (and whether its installer is downloaded and checked); check = ask GitHub now; install = restart Burrow into the downloaded update (only when the user agrees: the window closes and comes back). auto turns the automatic checks on or off.",
         schema: || {

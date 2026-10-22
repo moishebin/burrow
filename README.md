@@ -24,6 +24,7 @@ An open-source browser in the spirit of Arc, built with Rust and Chromium (via C
 - **Resizable sidebar**: drag its right edge; double-click the edge for the default width.
 - **Picture in picture** for any video, like Arc: switch away from a tab playing a video and it keeps playing in a small floating window; come back and it returns to the page. Or right-click a tab → Picture in Picture, or Ctrl+Shift+P.
 - **Updates itself** (Windows installer): new versions download in the background and install when you restart or quit. **+ → About and Updates…**
+- **Website notifications** show as Windows notifications; click one to jump to its tab.
 - **Clean window**: minimize, maximize and close hide in the top-right corner until you point there.
 
 Status: early, but usable day to day on Windows. See [docs/FEATURES.md](docs/FEATURES.md) for what works and what doesn't yet, and [docs/DECISIONS.md](docs/DECISIONS.md) for the reasoning behind each choice.
@@ -97,7 +98,7 @@ burrow --agent read_page '{"tab_id":"…","format":"elements"}'
 burrow --agent screenshot '{"tab_id":"…"}' --out page.png
 ```
 
-Tools: `list_spaces`, `get_space`, `list_tabs`, `open_tab`, `close_tab`, `focus_tab`, `navigate`, `move_tab`, `rename_tab`, `create_folder`, `update_folder`, `create_space`, `update_space`, `delete_space`, `switch_space`, `air_traffic_control`, `split_view`, `duplicate_tab`, `link_settings`, `boost`, `search_history`, `delete_history`, `peek`, `set_zoom`, `mute_tab`, `sidebar`, `window`, `picture_in_picture`, `update`, `extensions`, `read_page`, `screenshot`, `click`, `type_text`, `press_key`, `wait_for`, `eval_js`.
+Tools: `list_spaces`, `get_space`, `list_tabs`, `open_tab`, `close_tab`, `focus_tab`, `navigate`, `move_tab`, `rename_tab`, `create_folder`, `update_folder`, `create_space`, `update_space`, `delete_space`, `switch_space`, `air_traffic_control`, `split_view`, `duplicate_tab`, `link_settings`, `boost`, `search_history`, `delete_history`, `peek`, `set_zoom`, `mute_tab`, `sidebar`, `window`, `picture_in_picture`, `notifications`, `update`, `extensions`, `read_page`, `screenshot`, `click`, `type_text`, `press_key`, `wait_for`, `eval_js`.
 
 ```sh
 burrow --agent sidebar '{"width":320}'

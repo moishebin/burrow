@@ -370,7 +370,7 @@ Releases are GitHub releases tagged `v<version>`, with the archives attached. Th
 - `BURROW_UPDATE_URL` points the check at another server answering the same JSON (for testing).
 - Agents: the `update` tool (status, check, install, auto on/off).
 
-**Verified** on Linux/Xvfb against a local fake release (0.0.99): the automatic check found it; with the install path forced on for the test, the setup downloaded, passed the checksum and the Restart card appeared; a wrong checksum deleted the file and reported it; without the install path, the "is out" card with Download appeared. A real check against GitHub reported 0.0.2 as current. The Windows install step (`/S /RELAUNCH`) is verified on Windows separately (see the Windows check entry after this one).
+**Verified** on Linux/Xvfb against a local fake release (0.0.99): the automatic check found it; with the install path forced on for the test, the setup downloaded, passed the checksum and the Restart card appeared; a wrong checksum deleted the file and reported it; without the install path, the "is out" card with Download appeared. A real check against GitHub reported 0.0.2 as current. The Windows install step (`/S /RELAUNCH`) is verified on Windows in D-043.
 
 ## D-038 · Resizable split view (2026-10-22)
 
@@ -411,3 +411,27 @@ Agents: `split_view` takes `ratio` when opening and has a `resize` action.
 **Verified** on Linux/Xvfb with a test extension (MV3 service worker): the manifest was rewritten and the hook loaded; its badge "7" in its green appeared on its pinned toolbar button; `tabs.create` and `windows.create` from the background opened tabs; `tabs.query({active, currentWindow})` returned the tab the user was on. Called directly, the bridge refused a wrong secret and a web page's Origin.
 
 **Limits.** Extensions run in every space's profile (D-032), and each copy's background can set the badge; a badge for all tabs shows what the last copy set. Burrow's tabs report window id -1 to extensions. Extension context menus, keyboard commands and side panels are still missing.
+
+## D-042 · Website notifications as system notifications (2026-10-22)
+
+**Finding.** In Burrow's Alloy-style tabs, Chromium accepts `new Notification(…)` once permission is granted (Burrow's prompt works, D-014) and fires `show`, but nothing reaches the screen. On Windows no toast arrived and Windows' notification database had no handler for Burrow or Chromium; on Linux no window appeared.
+
+**Decision.**
+- **Catching them.** As each page (and frame) starts loading (`LoadHandler::on_load_start`), Burrow runs a small script (`burrow_core::notify::page_script`) that replaces `window.Notification`, and `showNotification` on service worker registrations. Pages using those get standard behavior: `permission`, `requestPermission`, `show`/`error`/`click`/`close` events, `close()`. If the page's real permission is "granted", the notification goes to Burrow as a console message with a secret made fresh each run. The secret lives only inside the script's closure, so pages can't send fake ones. Permission stays Chromium's, through Burrow's prompts.
+- **Showing them.** On Windows, as a **toast** through WinRT (the `windows` crate, Windows builds only), with the site as its attribution line. Burrow registers its own toast identity at every start (`HKCU\Software\Classes\AppUserModelId\Burrow.Browser`: name and icon), so toasts work without a Store package or a special shortcut. On Linux, `notify-send` if it is there.
+- **Clicking one** shows its tab (in its space), brings the window to the front, and fires the page's `click` event, so a mail site can open the message.
+- **+ → Turn Off Website Notifications** (`settings.notifications`). Agents: the `notifications` tool (list the latest, open one as a click would, enable/disable).
+
+**Verified.** Linux/Xvfb: the page's `Notification` is Burrow's and permission is still Chromium's; a notification reached Burrow; `open` showed its tab and fired the page's `onclick` once; a fake message with the wrong secret was ignored. Windows (a test copy next to an installed Burrow): the toast reached Windows: its database recorded it under `Burrow.Browser`. The screen was locked, so the toast wasn't seen or clicked there.
+
+**Limits.** Notifications a service worker shows on its own (web push while no page is open) don't go through the page script, so they still aren't shown. Notification icons and action buttons aren't shown. A toast clicked after Burrow was restarted does nothing.
+
+## D-043 · Windows checks of this round (2026-10-22)
+
+Done on the development machine while its screen was locked: no mouse, keyboard or screen capture, only DevTools and the agent API. The installed Burrow kept running throughout (its processes were counted before and after). Its registry entries and Start-menu shortcut were exported before and put back after; the installer of a test copy writes the same ones.
+
+- **Auto-update (D-037), end to end.** A setup built from this code as 0.0.2 was installed silently into a test folder and run with its own data folder and `BURROW_UPDATE_URL` pointing at a local fake release (a second setup built as 0.0.99 and its `SHA256SUMS.txt`). The automatic check found 0.0.99 20 s after start, downloaded the 138 MB setup and checked it; `update install` closed Burrow, the setup replaced it (the exe now reports 0.0.99) and Burrow ran again. To rule out the agent client starting it, `setup /S /RELAUNCH` was also run with the test copy fully stopped and no agent calls: it started Burrow. The test copy's uninstaller then removed it.
+- **Default-browser registration (D-024).** Not run for real: it would point the machine's settings at a test copy. The risky part, the quoting of `reg add` values, was checked by running `reg.exe` with exactly the command lines Rust builds, under a throwaway key: `"C:\Users\Some One\…\burrow.exe" "%1"` and the icon value read back exactly. (A small test program was blocked by Windows Defender, which flags unsigned programs that write the registry; it was deleted.)
+- **Picture in picture (D-036).** The "Picture in picture" window opened next to Burrow's window.
+- **Notifications (D-042).** Chromium alone dropped them; with D-042 the toast reached Windows.
+- **Not checked here:** hovering the window buttons (D-035), dragging and resizing the frameless window, the split view divider and dialogs with real input; they were verified on Linux/Xvfb.

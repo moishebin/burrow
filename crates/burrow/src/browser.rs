@@ -19,6 +19,7 @@ mod divider;
 mod extensions;
 mod icons;
 mod modal;
+mod notes;
 mod peek;
 mod pip;
 mod tools;
@@ -27,6 +28,7 @@ mod window_buttons;
 
 pub use extensions::{helper_tab_id, is_popup_browser, load_extension_switch, restart_requested, POPUP_PREFIX};
 pub use modal::dialog_open;
+pub use notes::{page_script as notification_script, parse_note};
 pub use peek::is_peek_browser;
 pub use pip::BINDING as PIP_BINDING;
 pub use update::run_pending_install;
@@ -262,6 +264,8 @@ pub struct Burrow {
     modal: Option<modal::Modal>,
     /// Extensions' badges, by extension id (D-041).
     ext_badges: HashMap<String, extensions::Badge>,
+    /// Web notifications shown lately (D-042).
+    notes: notes::Notes,
 }
 
 /// Messages from the sidebar that aren't model commands.
@@ -335,6 +339,8 @@ enum Act {
     CheckForUpdates,
     InstallUpdate,
     SetAutoUpdate { on: bool },
+    /// Show websites' notifications as system notifications (D-042).
+    SetNotifications { on: bool },
     /// The split view's divider is dragged `dx` pixels (phase start, move or end), D-038.
     SplitDrag { dx: f64, phase: String },
     /// Double-click on the divider: equal halves.
@@ -426,10 +432,12 @@ pub fn start() {
             divider: None,
             modal: None,
             ext_badges: HashMap::new(),
+            notes: Default::default(),
         })
     });
     crate::agent::start_server();
     crate::ext_bridge::start();
+    crate::notify::register();
 
     let mut window_delegate = views::MainWindowDelegate::new();
     window_create_top_level(Some(&mut window_delegate));
@@ -814,6 +822,10 @@ impl Burrow {
                     self.toast = Some(e);
                     self.push_state();
                 }
+            }
+            Act::SetNotifications { on } => {
+                self.state.settings.notifications = on;
+                self.changed();
             }
             Act::SetAutoUpdate { on } => {
                 self.state.settings.auto_update = on;

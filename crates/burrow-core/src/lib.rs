@@ -8,6 +8,7 @@ pub mod favicon;
 pub mod history;
 pub mod import_arc;
 pub mod links;
+pub mod notify;
 pub mod model;
 pub mod omnibox;
 pub mod store;
