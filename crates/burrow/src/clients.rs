@@ -368,6 +368,13 @@ wrap_find_handler! {
 wrap_display_handler! {
     struct ContentDisplay {}
     impl DisplayHandler {
+        /// A page started or stopped using the camera or microphone (keeps the tab awake, D-040).
+        fn on_media_access_change(&self, browser: Option<&mut Browser>, has_video_access: ::std::os::raw::c_int, has_audio_access: ::std::os::raw::c_int) {
+            let Some(id) = id_of(browser) else { return };
+            let on = has_video_access != 0 || has_audio_access != 0;
+            browser::later(move |b| b.on_media_access(id, on));
+        }
+
         fn on_title_change(&self, browser: Option<&mut Browser>, title: Option<&CefString>) {
             let (Some(id), title) = (id_of(browser), string(title)) else { return };
             browser::later(move |b| b.on_title(id, title));
@@ -746,6 +753,19 @@ wrap_request_context_handler! {
 wrap_dev_tools_message_observer! {
     pub struct AgentDevTools {}
     impl DevToolsMessageObserver {
+        /// CEF drops answers from a frame's own session (`sessionId`, D-040); deliver them here.
+        fn on_dev_tools_message(&self, _browser: Option<&mut Browser>, message: Option<&[u8]>) -> ::std::os::raw::c_int {
+            let message = message.unwrap_or_default();
+            if !message.windows(11).any(|w| w == b"\"sessionId\"") {
+                return 0;
+            }
+            let Ok(v) = serde_json::from_slice::<serde_json::Value>(message) else { return 0 };
+            let (Some(id), Some(_)) = (v["id"].as_i64(), v["sessionId"].as_str()) else { return 0 };
+            let success = v.get("error").is_none();
+            let json = if success { v["result"].to_string() } else { v["error"].to_string() };
+            browser::later(move |b| b.on_devtools_result(id as i32, success, &json));
+            1
+        }
         fn on_dev_tools_method_result(
             &self,
             _browser: Option<&mut Browser>,
@@ -757,18 +777,27 @@ wrap_dev_tools_message_observer! {
             browser::later(move |b| b.on_devtools_result(message_id, success != 0, &json));
         }
 
-        /// Picture in picture reports through a binding (D-036).
+        /// Picture in picture reports through a binding (D-036); frames from other sites come and
+        /// go as DevTools sessions, for sleeping tabs (D-040).
         fn on_dev_tools_event(&self, browser: Option<&mut Browser>, method: Option<&CefString>, params: Option<&[u8]>) {
-            if string(method) != "Runtime.bindingCalled" {
+            let method = string(method);
+            if !matches!(method.as_str(), "Runtime.bindingCalled" | "Target.attachedToTarget" | "Target.detachedFromTarget") {
                 return;
             }
             let Some(id) = id_of(browser) else { return };
             let Ok(v) = serde_json::from_slice::<serde_json::Value>(params.unwrap_or_default()) else { return };
-            if v["name"] != browser::PIP_BINDING {
-                return;
+            let session = v["sessionId"].as_str().unwrap_or_default().to_string();
+            match method.as_str() {
+                "Target.attachedToTarget" if v["targetInfo"]["type"] == "iframe" => {
+                    browser::later(move |b| b.on_frame_session(id, session, true));
+                }
+                "Target.detachedFromTarget" => browser::later(move |b| b.on_frame_session(id, session, false)),
+                "Runtime.bindingCalled" if v["name"] == browser::PIP_BINDING => {
+                    let event = v["payload"].as_str().unwrap_or_default().to_string();
+                    browser::later(move |b| b.on_pip_event(id, &event));
+                }
+                _ => {}
             }
-            let event = v["payload"].as_str().unwrap_or_default().to_string();
-            browser::later(move |b| b.on_pip_event(id, &event));
         }
     }
 }

@@ -869,6 +869,8 @@ function tabMenu(e, t, section) {
     { label: "Duplicate Tab", action: () => cmd("duplicate_tab", { tab_id: t.id }) },
     live && { label: live.muted ? "Unmute Tab" : "Mute Tab", action: () => act("set_muted", { tab_id: t.id, muted: !live.muted }) },
     live && { label: view.pip === t.id ? "Exit Picture in Picture" : "Picture in Picture", action: () => act("toggle_pip", { tab_id: t.id }) },
+    sleepItems(t),
+    live && !(view.visible || []).includes(t.id) && { label: "Sleep Now", action: () => cmd("sleep_tab", { tab_id: t.id }) },
     web && { label: "Send This Site to a Space…", action: () => atcDialog(hostOf(t.url)) },
     web && { label: "Boost This Site…", action: () => boostDialog(hostOf(t.url)) },
     { sep: true },
@@ -887,6 +889,41 @@ function tabMenu(e, t, section) {
       },
     },
   ]);
+}
+
+// Sleeping tabs (D-040): minutes out of sight before a tab's page is unloaded; 0 = never.
+const SLEEP_CHOICES = [[5, "5 minutes"], [10, "10 minutes"], [15, "15 minutes"], [30, "30 minutes"], [60, "1 hour"], [240, "4 hours"], [0, "Never"]];
+const sleepLabel = (m) => (SLEEP_CHOICES.find(([v]) => v === m) || [m, m === 1 ? "1 minute" : `${m} minutes`])[1];
+
+function sleepItems(t) {
+  const own = t.sleep_after_minutes ?? null;
+  const mark = (on, label) => (on ? "✓ " : "\u2002\u2002") + label; // en spaces don't collapse
+  return {
+    label: "Sleep After",
+    sub: [
+      { heading: "Unload this tab when out of sight for" },
+      { label: mark(own === null, `Default (${sleepLabel(view.state.settings.sleep_after_minutes)})`), action: () => cmd("set_tab_sleep", { tab_id: t.id, minutes: null }) },
+      ...SLEEP_CHOICES.map(([m, label]) => ({ label: mark(own === m, label), action: () => cmd("set_tab_sleep", { tab_id: t.id, minutes: m }) })),
+    ],
+  };
+}
+
+function sleepDialog() {
+  openDialog((d) => {
+    d.append(el("h2", null, "Sleeping Tabs"));
+    d.append(el("p", null, "A tab you haven't looked at for a while is put to sleep to save memory: its page is unloaded and loads again when you open it. Tabs playing sound or video, in a call, or with text you've typed stay awake. Right-click a tab → Sleep After to give it its own time."));
+    const sel = el("select");
+    const current = view.state.settings.sleep_after_minutes;
+    const choices = SLEEP_CHOICES.some(([m]) => m === current) ? SLEEP_CHOICES : [[current, sleepLabel(current)], ...SLEEP_CHOICES];
+    for (const [m, label] of choices) {
+      const o = el("option", null, m ? `After ${label}` : label);
+      o.value = m;
+      o.selected = m === current;
+      sel.append(o);
+    }
+    d.append(sel);
+    buttons(d, "Save", () => cmd("set_sleep_default", { minutes: Number(sel.value) }));
+  });
 }
 
 function folderMenu(e, f) {
@@ -1010,6 +1047,7 @@ function addMenu(e) {
       label: view.state.settings.auto_pip ? "Turn Off Auto Picture in Picture" : "Turn On Auto Picture in Picture",
       action: () => act("set_auto_pip", { on: !view.state.settings.auto_pip }),
     },
+    { label: "Sleeping Tabs…", action: sleepDialog },
     { label: "Extensions…", action: extensionsDialog },
     { label: "Keyboard Shortcuts", action: shortcutsDialog },
     { label: view.update.ready ? `Restart to Update to ${view.update.available}` : "About and Updates…", action: view.update.ready ? () => act("install_update") : updateDialog },

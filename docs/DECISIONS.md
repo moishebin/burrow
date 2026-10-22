@@ -395,6 +395,19 @@ Agents: `split_view` takes `ratio` when opening and has a `resize` action.
 
 **Verified** on Linux/Xvfb with real input (on a display of its own: another checkout's test Burrow shared :99, so `run-xvfb.sh` now takes `BURROW_XVFB_DISPLAY`): History (Ctrl+H) opens centered with the page visible and dimmed behind; searching filters it; Esc from the page closes it, three times running; clicking the backdrop closes it; Extensions and Air Traffic Control from the + menu; Rename Space from the space menu gets its space, takes typing and saves with Enter, twice in a row.
 
+## D-040 · Sleeping tabs (2026-10-22)
+
+**Context.** A tab's page kept running until the tab was closed or unloaded by hand, so memory grew with every tab opened in a session (D-034).
+
+**Decision.** A tab out of sight for **10 minutes** (the default, `settings.sleep_after_minutes`) is put to sleep: its browser is closed, the tab stays where it is, and the page loads again at its current address when shown. Scroll position and the page's back/forward list are lost, as after a restart.
+- **Per tab.** Right-click → *Sleep After* gives a tab its own time (5 min … 4 hours, or Never; `Tab::sleep_after_minutes`, `None` = the default). *+ → Sleeping Tabs…* sets the default (0 = never). *Sleep Now* unloads a tab that isn't on screen.
+- **What stays awake.** Tabs on screen (both halves of a shown split), tabs using the camera or microphone (CEF's `on_media_access_change`: calls), and tabs waiting on a permission prompt. Before sleeping a tab, Burrow asks the page (`Runtime.evaluate` over the tab's DevTools connection, no user gesture) whether it has a picture-in-picture window (D-036), audible media playing, a text field holding typed text that differs from its default, or the cursor in a rich editor (`contenteditable`) that holds text. Frames from other sites (an embedded YouTube player) run in their own process, so the page can't see into them: Burrow turns on `Target.setAutoAttach` (flattened, without pausing frames) the first time, keeps each frame's DevTools session, and asks every frame the same question. If anything is in use the tab stays awake and is asked again after another full period. A page or frame that doesn't answer counts as not in use.
+- **When.** A check runs every minute; a tab counts from when it was last on screen (or created, for background tabs).
+- **Model/app split.** `State::tabs_to_sleep` and `sleep_after_ms` decide who is due (unit-tested); `browser/sleep.rs` tracks when tabs were last seen, asks the page, and unloads.
+- Agents: the `tab_sleep` tool (default, a tab's own time, sleep now).
+
+**Limits.** CEF reports no "tab is playing sound" signal (its audio handler would take the sound away from the speakers), so sound is detected from `<audio>`/`<video>` elements: sound made only with Web Audio isn't seen. Frames nested inside a frame from another site aren't asked. A rich editor counts only while the cursor is in it.
+
 ## D-041 · Extensions: badges, pinned buttons, and tabs from their backgrounds (2026-10-22)
 
 (D-040 is taken by sleeping tabs, built in parallel on another branch.)

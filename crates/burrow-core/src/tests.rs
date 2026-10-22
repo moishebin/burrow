@@ -692,3 +692,52 @@ fn agent_split_and_duplicate_leave_the_users_view_alone() {
     let out = run_model_tool(&mut s, "link_settings", &json!({ "peek_new_tabs": false })).unwrap().unwrap();
     assert_eq!(out.result, json!({ "peek_new_tabs": false, "peek_from_pinned": true }));
 }
+
+#[test]
+fn tabs_sleep_after_their_time_out_of_sight() {
+    const MIN: u64 = 60_000;
+    let mut s = State::default();
+    let a = open(&mut s, "https://a.example");
+    let b = open(&mut s, "https://b.example");
+    let c = open(&mut s, "https://c.example"); // shown
+    let loaded = |now_seen: u64| vec![(a.as_str(), now_seen), (b.as_str(), now_seen), (c.as_str(), now_seen)];
+    // The default is 10 minutes; the shown tab never sleeps.
+    assert_eq!(s.settings.sleep_after_minutes, 10);
+    assert!(s.tabs_to_sleep(loaded(0), 9 * MIN).is_empty());
+    assert_eq!(s.tabs_to_sleep(loaded(0), 10 * MIN), vec![a.clone(), b.clone()]);
+    // A tab's own time wins; 0 = never.
+    s.apply(Command::SetTabSleep { tab_id: a.clone(), minutes: Some(0) }).unwrap();
+    s.apply(Command::SetTabSleep { tab_id: b.clone(), minutes: Some(60) }).unwrap();
+    assert!(s.tabs_to_sleep(loaded(0), 59 * MIN).is_empty());
+    assert_eq!(s.tabs_to_sleep(loaded(0), 60 * MIN), vec![b.clone()]);
+    s.apply(Command::SetTabSleep { tab_id: b.clone(), minutes: None }).unwrap();
+    assert_eq!(s.sleep_after_ms(&b), Some(10 * MIN));
+    // Default 0 = tabs without their own time never sleep.
+    s.apply(Command::SetSleepDefault { minutes: 0 }).unwrap();
+    assert!(s.tabs_to_sleep(loaded(0), 1000 * MIN).is_empty());
+    // Both halves of a shown split stay awake.
+    s.apply(Command::SetSleepDefault { minutes: 5 }).unwrap();
+    s.apply(Command::SplitView { tab_id: b.clone() }).unwrap();
+    assert!(s.tabs_to_sleep(loaded(0), 100 * MIN).is_empty());
+    // Sleeping now unloads; not a tab on screen.
+    assert_eq!(s.apply(Command::SleepTab { tab_id: c.clone() }), Err(CommandError::TabShown));
+    s.apply(Command::Unsplit { space_id: None }).unwrap();
+    assert_eq!(s.apply(Command::SleepTab { tab_id: b.clone() }), Ok(vec![Effect::CloseBrowser { tab_id: b.clone() }]));
+}
+
+#[test]
+fn agent_tab_sleep_tool() {
+    use crate::agent::run_model_tool;
+    use serde_json::json;
+    let mut s = State::default();
+    let a = open(&mut s, "https://a.example");
+    let _shown = open(&mut s, "https://b.example");
+    let out = run_model_tool(&mut s, "tab_sleep", &json!({ "default_minutes": 30 })).unwrap().unwrap();
+    assert_eq!(out.result, json!({ "default_minutes": 30 }));
+    let out = run_model_tool(&mut s, "tab_sleep", &json!({ "tab_id": a, "minutes": 0 })).unwrap().unwrap();
+    assert_eq!(out.result["tab"], json!({ "tab_id": a, "minutes": 0, "sleeps_after_minutes": null }));
+    let out = run_model_tool(&mut s, "tab_sleep", &json!({ "tab_id": a, "minutes": null, "sleep_now": true })).unwrap().unwrap();
+    assert_eq!(out.result["tab"]["sleeps_after_minutes"], 30);
+    assert_eq!(out.effects, vec![Effect::CloseBrowser { tab_id: a.clone() }]);
+    assert!(run_model_tool(&mut s, "tab_sleep", &json!({ "default_minutes": -1 })).unwrap().is_err());
+}

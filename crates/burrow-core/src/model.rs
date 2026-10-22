@@ -109,6 +109,16 @@ pub struct Settings {
     /// Websites' notifications show as system notifications (D-042).
     #[serde(default = "yes")]
     pub notifications: bool,
+    /// A tab out of sight for this many minutes is put to sleep: its page is unloaded to free
+    /// memory and loads again when shown. 0 = never. Tabs can override it (D-040).
+    #[serde(default = "default_sleep_minutes")]
+    pub sleep_after_minutes: u32,
+}
+
+pub const SLEEP_MINUTES_DEFAULT: u32 = 10;
+
+fn default_sleep_minutes() -> u32 {
+    SLEEP_MINUTES_DEFAULT
 }
 
 pub const SIDEBAR_WIDTH_DEFAULT: u32 = 264;
@@ -145,6 +155,7 @@ impl Default for Settings {
             auto_pip: true,
             auto_update: true,
             notifications: true,
+            sleep_after_minutes: SLEEP_MINUTES_DEFAULT,
         }
     }
 }
@@ -245,6 +256,9 @@ pub struct Tab {
     /// Milliseconds since the Unix epoch.
     #[serde(default)]
     pub last_active_ms: u64,
+    /// This tab's own sleep time in minutes (0 = never sleeps); `None` uses the default (D-040).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sleep_after_minutes: Option<u32>,
 }
 
 impl Tab {
@@ -257,6 +271,7 @@ impl Tab {
             favicon: None,
             home_url: None,
             last_active_ms: 0,
+            sleep_after_minutes: None,
         }
     }
 
@@ -464,6 +479,26 @@ impl State {
             Some(s) if s.left == active || s.right == active => vec![s.left.clone(), s.right.clone()],
             _ => vec![active],
         }
+    }
+
+    /// How long a tab may stay out of sight before it sleeps, in ms; `None` if it never does
+    /// (D-040).
+    pub fn sleep_after_ms(&self, tab_id: &str) -> Option<u64> {
+        let tab = self.tab(tab_id)?;
+        let minutes = tab.sleep_after_minutes.unwrap_or(self.settings.sleep_after_minutes);
+        (minutes > 0).then(|| minutes as u64 * 60_000)
+    }
+
+    /// Of the loaded tabs, given as (id, ms when last seen), the ones due to sleep: out of sight
+    /// longer than their sleep time. Tabs on screen never sleep.
+    pub fn tabs_to_sleep<'a>(&self, loaded: impl IntoIterator<Item = (&'a str, u64)>, now_ms: u64) -> Vec<Id> {
+        let visible = self.visible_tabs();
+        loaded
+            .into_iter()
+            .filter(|(id, _)| !visible.iter().any(|v| v == id))
+            .filter(|&(id, seen)| self.sleep_after_ms(id).is_some_and(|ms| now_ms.saturating_sub(seen) >= ms))
+            .map(|(id, _)| id.to_string())
+            .collect()
     }
 
     /// The space that owns a tab or folder.

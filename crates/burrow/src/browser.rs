@@ -22,6 +22,7 @@ mod modal;
 mod notes;
 mod peek;
 mod pip;
+mod sleep;
 mod tools;
 mod update;
 mod window_buttons;
@@ -78,6 +79,12 @@ struct LiveTab {
     emulated: bool,
     /// The tab's id for the extension APIs, once the helper extension has said (D-032).
     ext_tab: Option<i32>,
+    /// When the tab was last on screen (or created); it sleeps some time after (D-040).
+    seen_ms: u64,
+    /// The page uses the camera or microphone (a call): it never sleeps.
+    capturing: bool,
+    /// DevTools sessions of the page's frames from other sites, once watched (D-040).
+    frames: Option<Vec<String>>,
 }
 
 #[derive(Default, Clone, Copy, Serialize)]
@@ -502,6 +509,7 @@ impl Burrow {
         self.create_window_buttons();
         self.schedule_update_checks();
         self.archive_tick();
+        self.sleep_tick();
         // Links that started Burrow (Burrow as the default browser).
         for url in crate::external::take_startup_urls() {
             self.open_external(url);
@@ -964,8 +972,9 @@ impl Burrow {
             }
             for id in &self.visible {
                 if !visible.contains(id)
-                    && let Some(t) = self.tabs.get(id) {
+                    && let Some(t) = self.tabs.get_mut(id) {
                         t.view.set_visible(0);
+                        t.seen_ms = now_ms();
                     }
             }
             for (i, id) in visible.iter().enumerate() {
@@ -1050,6 +1059,9 @@ impl Burrow {
                 devtools: None,
                 emulated: false,
                 ext_tab: None,
+                seen_ms: now_ms(),
+                capturing: false,
+                frames: None,
             },
         );
     }

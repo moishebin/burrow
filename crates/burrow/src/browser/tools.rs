@@ -55,12 +55,21 @@ impl Burrow {
         }
         self.agent_seen();
         if let Some(result) = agent::run_model_tool(&mut self.state, tool, &args) {
-            let result = result.map(|o| {
+            let mut result = result.map(|o| {
                 for e in o.effects {
                     self.effect(e);
                 }
                 o.result
             });
+            // The model doesn't know which tabs have a running page (asleep or never opened).
+            if tool == "list_tabs"
+                && let Ok(Value::Array(tabs)) = &mut result
+            {
+                for t in tabs.iter_mut() {
+                    let live = t["id"].as_str().and_then(|id| self.tabs.get(id));
+                    t["loaded"] = json!(live.is_some());
+                }
+            }
             if !tool.starts_with("list_") && !tool.starts_with("get_") {
                 self.sync_view();
                 self.changed();
@@ -464,6 +473,12 @@ impl Burrow {
 
     /// Sends one DevTools protocol call to a tab's page.
     pub(super) fn devtools(&mut self, tab: &str, method: &str, params: Value, done: Done) {
+        self.devtools_in(tab, None, method, params, done);
+    }
+
+    /// Sends one DevTools call to a tab's page, or to one of its frames from another site
+    /// (`session`, from `Target.attachedToTarget`).
+    pub(super) fn devtools_in(&mut self, tab: &str, session: Option<&str>, method: &str, params: Value, done: Done) {
         let Some(live) = self.tabs.get_mut(tab) else {
             return done(self, Err("the tab isn't loaded".into()));
         };
@@ -473,14 +488,22 @@ impl Burrow {
         if live.devtools.is_none() {
             live.devtools = host.add_dev_tools_message_observer(Some(&mut clients::AgentDevTools::new()));
         }
-        self.send_devtools(&host, method, params, done);
+        self.send_devtools_in(&host, session, method, params, done);
     }
 
     /// Sends one DevTools call to any browser that has an `AgentDevTools` observer.
     pub(super) fn send_devtools(&mut self, host: &BrowserHost, method: &str, params: Value, done: Done) {
+        self.send_devtools_in(host, None, method, params, done);
+    }
+
+    fn send_devtools_in(&mut self, host: &BrowserHost, session: Option<&str>, method: &str, params: Value, done: Done) {
         let id = self.next_devtools_id;
         self.next_devtools_id += 1;
-        let message = json!({ "id": id, "method": method, "params": params }).to_string();
+        let mut message = json!({ "id": id, "method": method, "params": params });
+        if let Some(s) = session {
+            message["sessionId"] = json!(s);
+        }
+        let message = message.to_string();
         if host.send_dev_tools_message(Some(message.as_bytes())) == 0 {
             return done(self, Err(format!("{method} could not be sent")));
         }

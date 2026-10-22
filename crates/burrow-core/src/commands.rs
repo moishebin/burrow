@@ -91,6 +91,12 @@ pub enum Command {
     /// Air Traffic Control: open links matching `pattern` in this space (D-021).
     AddRoute { pattern: String, space_id: Id },
     RemoveRoute { route_id: Id },
+    /// Put a tab to sleep now: its page is unloaded and loads again when shown (D-040).
+    SleepTab { tab_id: Id },
+    /// A tab's own sleep time in minutes (0 = never); `None` goes back to the default.
+    SetTabSleep { tab_id: Id, minutes: Option<u32> },
+    /// How many minutes out of sight before a tab sleeps (0 = never).
+    SetSleepDefault { minutes: u32 },
 }
 
 /// Where to put a node.
@@ -142,6 +148,8 @@ pub enum CommandError {
     BadSplit,
     #[error("enter a domain like github.com or an address like github.com/my-org")]
     BadPattern,
+    #[error("a tab on screen can't sleep")]
+    TabShown,
 }
 
 pub type CommandResult = Result<Vec<Effect>, CommandError>;
@@ -236,6 +244,22 @@ impl State {
                 Ok(vec![])
             }
             Command::MoveNode { node_id, to } => self.move_node(&node_id, to),
+            Command::SleepTab { tab_id } => {
+                self.tab(&tab_id).ok_or_else(|| CommandError::NoTab(tab_id.clone()))?;
+                if self.visible_tabs().contains(&tab_id) {
+                    return Err(CommandError::TabShown);
+                }
+                Ok(vec![Effect::CloseBrowser { tab_id }])
+            }
+            Command::SetTabSleep { tab_id, minutes } => {
+                let tab = self.tab_mut(&tab_id).ok_or_else(|| CommandError::NoTab(tab_id.clone()))?;
+                tab.sleep_after_minutes = minutes;
+                Ok(vec![])
+            }
+            Command::SetSleepDefault { minutes } => {
+                self.settings.sleep_after_minutes = minutes;
+                Ok(vec![])
+            }
             Command::AddFavorite { tab_id } => self.move_node(
                 &tab_id,
                 Location {

@@ -241,6 +241,21 @@ pub const TOOLS: &[Tool] = &[
         },
     },
     Tool {
+        name: "tab_sleep",
+        description: "Sleeping tabs: a tab out of sight for a while has its page unloaded to free memory, and it loads again when shown. Tabs on screen, playing sound or video, in a call, or with typed text stay awake. Read or change the default time (default_minutes), one tab's own time (tab_id + minutes; null = back to the default), or put a tab to sleep now (tab_id + sleep_now). 0 minutes = never sleeps.",
+        schema: || {
+            object(
+                json!({
+                    "default_minutes": { "type": "integer", "minimum": 0, "description": "Minutes out of sight before any tab sleeps. 0 = never." },
+                    "tab_id": tab_id(),
+                    "minutes": { "type": ["integer", "null"], "minimum": 0, "description": "With tab_id: this tab's own time. 0 = never, null = use the default." },
+                    "sleep_now": { "type": "boolean", "description": "With tab_id: unload the tab now (not one on screen)." }
+                }),
+                &[],
+            )
+        },
+    },
+    Tool {
         name: "boost",
         description: "Boosts: the user's own CSS for a site, added to every page of it (open pages update at once). action list = all boosts; get = one site's CSS; set = replace it; remove = delete it. Give the site as host (e.g. github.com) or as a tab_id.",
         schema: || {
@@ -795,6 +810,33 @@ pub fn run_model_tool(state: &mut State, name: &str, args: &Value) -> Option<Res
                     vec![],
                 )
             }
+            "tab_sleep" => {
+                let mut fx = vec![];
+                if let Some(m) = args.get("default_minutes") {
+                    let minutes = m.as_u64().ok_or("default_minutes must be a whole number of minutes")?;
+                    fx.extend(apply(state, Command::SetSleepDefault { minutes: minutes.min(u32::MAX as u64) as u32 })?);
+                }
+                let mut result = json!({ "default_minutes": state.settings.sleep_after_minutes });
+                if let Some(tab_id) = str_arg(args, "tab_id") {
+                    if let Some(m) = args.get("minutes") {
+                        let minutes = match m {
+                            Value::Null => None,
+                            m => Some(m.as_u64().ok_or("minutes must be a whole number or null")?.min(u32::MAX as u64) as u32),
+                        };
+                        fx.extend(apply(state, Command::SetTabSleep { tab_id: tab_id.into(), minutes })?);
+                    }
+                    if bool_arg(args, "sleep_now") == Some(true) {
+                        fx.extend(apply(state, Command::SleepTab { tab_id: tab_id.into() })?);
+                    }
+                    let tab = state.tab(tab_id).ok_or_else(|| format!("no tab {tab_id}"))?;
+                    result["tab"] = json!({
+                        "tab_id": tab_id,
+                        "minutes": tab.sleep_after_minutes,
+                        "sleeps_after_minutes": state.sleep_after_ms(tab_id).map(|ms| ms / 60_000),
+                    });
+                }
+                done(result, fx)
+            }
             "air_traffic_control" => {
                 match str_arg(args, "action").unwrap_or("list") {
                     "list" => {}
@@ -820,7 +862,7 @@ pub fn run_model_tool(state: &mut State, name: &str, args: &Value) -> Option<Res
     const MODEL_TOOLS: &[&str] = &[
         "list_spaces", "get_space", "list_tabs", "close_tab", "focus_tab", "move_tab", "rename_tab", "create_folder",
         "update_folder", "create_space", "update_space", "delete_space", "switch_space", "air_traffic_control",
-        "split_view", "duplicate_tab", "link_settings",
+        "split_view", "duplicate_tab", "link_settings", "tab_sleep",
     ];
     MODEL_TOOLS.contains(&name).then(run)
 }
