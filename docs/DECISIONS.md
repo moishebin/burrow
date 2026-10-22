@@ -394,3 +394,20 @@ Agents: `split_view` takes `ratio` when opening and has a `resize` action.
 - Menus (right-click, +, the puzzle button) stay in the sidebar, as in Arc. Peeks and extension popups were already over the page.
 
 **Verified** on Linux/Xvfb with real input (on a display of its own: another checkout's test Burrow shared :99, so `run-xvfb.sh` now takes `BURROW_XVFB_DISPLAY`): History (Ctrl+H) opens centered with the page visible and dimmed behind; searching filters it; Esc from the page closes it, three times running; clicking the backdrop closes it; Extensions and Air Traffic Control from the + menu; Rename Space from the space menu gets its space, takes typing and saves with Enter, twice in a row.
+
+## D-041 · Extensions: badges, pinned buttons, and tabs from their backgrounds (2026-10-22)
+
+(D-040 is taken by sleeping tabs, built in parallel on another branch.)
+
+**Context.** D-032's limits: Burrow's tabs aren't Chrome's, so an extension's background can't open a tab (`tabs.create`: "No current window") or a window, `tabs.query` finds nothing, and badges (like an unread count) show nowhere. Chromium does keep the badge, but nothing outside the extension can read it.
+
+**Decision: a bridge script in each extension's background.**
+- At every start, before Chromium loads them, Burrow writes `burrow_hook.js` into each enabled extension's folder and has it run first in the background. A service worker gets `burrow_bg.js`, which loads the hook and then the extension's own worker (`importScripts`, or `import` for module workers). The original's name is kept in `burrow_bg_original.txt`, so this can be redone at every start. MV2 background scripts get the hook prepended. Extensions with a background *page*, or no background, are left alone (`burrow_core::extensions::bridge_manifest`, unit-tested).
+- The hook wraps `action.setBadgeText`/`setBadgeBackgroundColor` (also `browserAction`) to report to Burrow; `tabs.create` and `windows.create` (one window, always: a "window" opens as a tab); `tabs.query` when Chromium finds nothing, answered with the user's tab and the space's tabs, as D-032 does for popups; `windows.getCurrent`/`getLastFocused` when they fail.
+- It talks to Burrow over HTTP on 127.0.0.1, on a port of its own, with a secret. Both are chosen once and kept in `<data>/bridge.json`, because a second `burrow.exe` runs the same startup code before handing over to the running one and must write the very same hook. Only `POST /ext` from an `Origin: chrome-extension://<id>` with the secret is served. The id comes from the Origin, which pages can't set; the secret is only in the extensions' files. Requests are "simple" (text body, no custom headers), so there is no CORS preflight. If the saved port is taken at start, a new one is saved for the next start.
+- **Badges and pins.** A badge is kept per extension, and per tab when the extension set one for a tab. **Pinning** an extension (Manage Extensions → Pin, `Extension.pinned`) gives it a button in the sidebar's toolbar with its badge; clicking opens its popup, right-click unpins. Badges of unpinned extensions show as a dot on the puzzle button and next to their names in its menu.
+- Agents: `extensions` gets `pin` / `unpin`, and `list` shows `pinned` and `badge`.
+
+**Verified** on Linux/Xvfb with a test extension (MV3 service worker): the manifest was rewritten and the hook loaded; its badge "7" in its green appeared on its pinned toolbar button; `tabs.create` and `windows.create` from the background opened tabs; `tabs.query({active, currentWindow})` returned the tab the user was on. Called directly, the bridge refused a wrong secret and a web page's Origin.
+
+**Limits.** Extensions run in every space's profile (D-032), and each copy's background can set the badge; a badge for all tabs shows what the last copy set. Burrow's tabs report window id -1 to extensions. Extension context menus, keyboard commands and side panels are still missing.

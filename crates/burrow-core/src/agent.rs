@@ -350,11 +350,11 @@ pub const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "extensions",
-        description: "Chrome extensions. list = installed ones (running = loaded now); install = from the Chrome Web Store (web_store: a store link or id) or from disk (path: a folder, .crx or .zip); update = fetch newer Web Store versions (all, or one extension); enable / disable / remove one; open = show its popup over the tab the user is on (only when asked: the user sees it), close = close it; restart = restart Burrow, which installs, updates, removals and on/off changes need (only when the user agrees: it reloads every tab). Extensions run in every space, each with its own storage.",
+        description: "Chrome extensions. list = installed ones (running = loaded now); install = from the Chrome Web Store (web_store: a store link or id) or from disk (path: a folder, .crx or .zip); update = fetch newer Web Store versions (all, or one extension); enable / disable / remove one; pin / unpin = show its button (with its badge) in the sidebar's toolbar or not; open = show its popup over the tab the user is on (only when asked: the user sees it), close = close it; restart = restart Burrow, which installs, updates, removals and on/off changes need (only when the user agrees: it reloads every tab). Extensions run in every space, each with its own storage.",
         schema: || {
             object(
                 json!({
-                    "action": { "type": "string", "enum": ["list", "install", "update", "enable", "disable", "remove", "open", "close", "restart"], "description": "Default list." },
+                    "action": { "type": "string", "enum": ["list", "install", "update", "enable", "disable", "pin", "unpin", "remove", "open", "close", "restart"], "description": "Default list." },
                     "web_store": { "type": "string", "description": "For install: a chromewebstore.google.com link or an extension id." },
                     "path": { "type": "string", "description": "For install: an unpacked extension's folder, or a .crx/.zip file." },
                     "extension": { "type": "string", "description": "An installed extension's id or name." }

@@ -73,7 +73,7 @@ Priority: **P0** = needed to switch from Arc · P1 = soon after · P2 = later
 
 | Feature | Status | Notes |
 |---|---|---|
-| Chrome extensions | 🟡 | D-032. Install from the Chrome Web Store ("Add to Burrow" on a store page, or a link), a folder or a `.crx`; puzzle button opens popups; on/off, remove, update; changes need a restart (offered). Verified on Xvfb (Bitwarden, Dark Reader, uBlock Origin Lite) and on Windows. Missing: toolbar badges, extension context menus and shortcuts, `chrome.tabs`/`windows` from extension backgrounds, auto-update. Agent tool `extensions`. |
+| Chrome extensions | 🟡 | D-032. Install from the Chrome Web Store ("Add to Burrow" on a store page, or a link), a folder or a `.crx`; puzzle button opens popups; on/off, remove, update; changes need a restart (offered). Verified on Xvfb (Bitwarden, Dark Reader, uBlock Origin Lite) and on Windows. Pin an extension to the toolbar to see its badge (D-041); backgrounds can open tabs and find the active tab (D-041). Missing: extension context menus and shortcuts, auto-update. Agent tool `extensions`. |
 | Built-in ad blocker | 💤 | |
 | macOS / Linux packages | 🟡 | Linux `.tar.gz` since 0.0.1 (D-020). macOS needs a Mac to build (app bundle, signing). |
 | Sync between machines | 💤 | |

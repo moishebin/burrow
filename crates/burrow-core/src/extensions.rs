@@ -44,6 +44,9 @@ pub struct Extension {
     /// Its options page, relative to the folder.
     #[serde(default)]
     pub options: Option<String>,
+    /// Shown as a button in the sidebar's toolbar, with its badge (D-041).
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -399,6 +402,7 @@ fn install_into(from: InstallFrom, root: &Path, staging: &Path, source: Source) 
         icon: info.icon,
         popup: info.popup,
         options: info.options,
+        pinned: false,
     })
 }
 
@@ -430,6 +434,153 @@ pub fn helper_files(secret: &str) -> Vec<(&'static str, String)> {
         ("worker.js", "chrome.runtime.onMessage.addListener((m, sender, send) => send(sender.tab ? sender.tab.id : null));".into()),
         ("tab.js", tab_js),
     ]
+}
+
+// ---- The bridge (D-041) ---------------------------------------------------------------------------
+//
+// Burrow's tabs aren't Chrome tabs (D-032), so an extension's background can't open tabs or
+// windows, `chrome.tabs.query` finds nothing, and its badge shows nowhere. Burrow adds a small
+// script to each extension's background that sends those to Burrow over a local connection.
+
+/// The bridge script, loaded first in the extension's background.
+pub const BRIDGE_HOOK: &str = "burrow_hook.js";
+/// The service worker Burrow puts in place: it loads the hook, then the extension's own.
+pub const BRIDGE_WORKER: &str = "burrow_bg.js";
+/// Remembers the extension's own service worker once the manifest names Burrow's.
+pub const BRIDGE_ORIGINAL: &str = "burrow_bg_original.txt";
+
+/// What adding the bridge to an extension writes, besides the hook and the manifest.
+#[derive(Debug, PartialEq)]
+pub struct BridgePlan {
+    /// `burrow_bg.js`, for a service worker.
+    pub worker: Option<String>,
+    /// The extension's own service worker, to remember.
+    pub original: Option<String>,
+}
+
+/// Points the manifest's background at the bridge. `original` is the remembered service worker
+/// when the manifest already names Burrow's. None: nothing runs in the background to bridge
+/// (or it's a background *page*, which isn't supported).
+pub fn bridge_manifest(manifest: &mut Value, original: Option<&str>) -> Option<BridgePlan> {
+    let bg = manifest.get_mut("background")?.as_object_mut()?;
+    if let Some(sw) = bg.get("service_worker").and_then(Value::as_str) {
+        let own = if sw == BRIDGE_WORKER { original?.to_string() } else { sw.to_string() };
+        let own = own.trim_start_matches("./").trim_start_matches('/').to_string();
+        let module = bg.get("type").and_then(Value::as_str) == Some("module");
+        let script = serde_json::to_string(&own).ok()?;
+        let worker = if module {
+            format!("import \"./{BRIDGE_HOOK}\";\nimport {};\n", serde_json::to_string(&format!("./{own}")).ok()?)
+        } else {
+            format!("importScripts(\"{BRIDGE_HOOK}\", {script});\n")
+        };
+        bg.insert("service_worker".into(), Value::String(BRIDGE_WORKER.into()));
+        return Some(BridgePlan { worker: Some(worker), original: Some(own) });
+    }
+    let scripts = bg.get_mut("scripts")?.as_array_mut()?;
+    if !scripts.iter().any(|s| s.as_str() == Some(BRIDGE_HOOK)) {
+        scripts.insert(0, Value::String(BRIDGE_HOOK.into()));
+    }
+    Some(BridgePlan { worker: None, original: None })
+}
+
+/// Adds the bridge to an installed extension's folder (again at every start: the hook carries
+/// the connection details). Does nothing for extensions without a background script.
+pub fn add_bridge(dir: &Path, hook: &str) -> Result<bool, ExtensionError> {
+    let manifest_path = dir.join("manifest.json");
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path)?).map_err(|e| ExtensionError::BadManifest(e.to_string()))?;
+    let original = fs::read_to_string(dir.join(BRIDGE_ORIGINAL)).ok();
+    let Some(plan) = bridge_manifest(&mut manifest, original.as_deref().map(str::trim)) else { return Ok(false) };
+    fs::write(dir.join(BRIDGE_HOOK), hook)?;
+    if let Some(worker) = plan.worker {
+        fs::write(dir.join(BRIDGE_WORKER), worker)?;
+    }
+    if let Some(original) = plan.original {
+        fs::write(dir.join(BRIDGE_ORIGINAL), original)?;
+    }
+    fs::write(&manifest_path, serde_json::to_string_pretty(&manifest).unwrap_or_default())?;
+    Ok(true)
+}
+
+/// The bridge script: reports badges and sends tab and window requests to Burrow at
+/// `127.0.0.1:port`, with `secret`, which only extensions' files hold.
+pub fn bridge_hook(port: u16, secret: &str) -> String {
+    format!(
+        r#"// Added by Burrow (D-041). Burrow's tabs aren't Chrome's, so this sends what the extension
+// asks of tabs and windows to Burrow, and shows its badge there.
+(() => {{
+  if (globalThis.__burrowBridge || !globalThis.chrome) return;
+  globalThis.__burrowBridge = true;
+  const URL = "http://127.0.0.1:{port}/ext", SECRET = {secret};
+  // A "simple" request (text body, no custom headers): no CORS preflight.
+  const call = (what, args, tries = 0) =>
+    fetch(URL, {{ method: "POST", body: JSON.stringify({{ secret: SECRET, what, ...args }}) }})
+      .then((r) => r.json())
+      .then((r) => {{ if (!r.ok) throw new Error(r.error); return r.result; }})
+      .catch((e) => {{
+        // Burrow may still be starting.
+        if (tries < 5) return new Promise((ok) => setTimeout(ok, 1000 * (tries + 1))).then(() => call(what, args, tries + 1));
+        throw e;
+      }});
+  const answer = (p, cb) => {{ if (typeof cb === "function") {{ p.then(cb, () => cb()); return; }} return p; }};
+  const color = (c) => Array.isArray(c) ? `rgba(${{c[0]}},${{c[1]}},${{c[2]}},${{(c[3] ?? 255) / 255}})` : c;
+
+  const action = chrome.action || chrome.browserAction;
+  if (action) {{
+    for (const [name, key] of [["setBadgeText", "text"], ["setBadgeBackgroundColor", "color"]]) {{
+      const own = action[name];
+      if (typeof own !== "function") continue;
+      action[name] = function (details, ...rest) {{
+        const value = details && details[key];
+        call("badge", {{ tab: details && details.tabId != null ? details.tabId : null, [key]: key === "color" ? color(value) : value }}).catch(() => {{}});
+        return own.call(action, details, ...rest);
+      }};
+    }}
+  }}
+
+  const tabs = chrome.tabs, windows = chrome.windows;
+  if (tabs) {{
+    tabs.create = (props, cb) => {{
+      props = props || {{}};
+      return answer(call("open", {{ url: props.url || "", active: props.active !== false }}).then(() => ({{ id: -1, url: props.url || "", active: props.active !== false }})), cb);
+    }};
+    const query = tabs.query.bind(tabs);
+    const filters = ["url", "title", "status", "audible", "muted", "pinned", "index", "groupId", "discarded", "windowType"];
+    tabs.query = (q, cb) => answer(query(q || {{}}).then(async (found) => {{
+      q = q || {{}};
+      if (found.length) return found;
+      const {{ active, all }} = await call("tabs", {{}});
+      const wantsActive = q.active === true || q.highlighted === true || q.currentWindow === true || q.lastFocusedWindow === true;
+      const ids = wantsActive && q.active !== false ? (active == null ? [] : [active]) : filters.some((k) => q[k] !== undefined) ? [] : all;
+      const list = (await Promise.all(ids.map((id) => tabs.get(id).catch(() => null)))).filter(Boolean);
+      return list.map((t) => Object.assign(t, {{ active: t.id === active, highlighted: t.id === active, selected: t.id === active }}));
+    }}), cb);
+  }}
+  if (windows) {{
+    // One window, always: a new window opens as a tab.
+    windows.create = (data, cb) => {{
+      data = data || {{}};
+      const urls = Array.isArray(data.url) ? data.url : [data.url || ""];
+      const opened = urls.reduce((p, url, i) => p.then(() => call("open", {{ url, active: i === 0 && data.focused !== false }})), Promise.resolve());
+      return answer(opened.then(() => ({{ id: -1, focused: true, type: "normal", state: "normal", incognito: false, alwaysOnTop: false, tabs: [] }})), cb);
+    }};
+    const current = async () => {{
+      const {{ active }} = await call("tabs", {{}});
+      const t = active == null ? null : await tabs.get(active).catch(() => null);
+      return {{ id: t ? t.windowId : -1, focused: true, type: "normal", state: "normal", incognito: false, alwaysOnTop: false }};
+    }};
+    for (const name of ["getCurrent", "getLastFocused"]) {{
+      const own = windows[name].bind(windows);
+      windows[name] = (info, cb) => {{
+        if (typeof info === "function") [cb, info] = [info, {{}}];
+        // Without a Chrome window it answers -1 ("no window"), or fails.
+        return answer(own(info || {{}}).then((w) => (w && w.id >= 0 ? w : current())).catch(current), cb);
+      }};
+    }}
+  }}
+}})();
+"#,
+        secret = serde_json::to_string(secret).unwrap_or_default(),
+    )
 }
 
 /// The tab id in a console message from the helper extension, if it carries `secret`.
@@ -466,9 +617,14 @@ impl crate::State {
     /// on and where it sits in the list).
     pub fn add_extension(&mut self, ext: Extension) {
         match self.extensions.iter_mut().find(|e| e.id == ext.id) {
-            Some(old) => *old = Extension { enabled: old.enabled, ..ext },
+            Some(old) => *old = Extension { enabled: old.enabled, pinned: old.pinned, ..ext },
             None => self.extensions.push(ext),
         }
+    }
+
+    /// Pins an extension to the toolbar, or unpins it. False if there is no such extension.
+    pub fn set_extension_pinned(&mut self, id: &str, pinned: bool) -> bool {
+        self.extensions.iter_mut().find(|e| e.id == id).map(|e| e.pinned = pinned).is_some()
     }
 
     /// False if there is no such extension.
@@ -659,6 +815,7 @@ mod tests {
             icon: None,
             popup: None,
             options: None,
+            pinned: false,
         };
         let mut s = crate::State::default();
         s.add_extension(ext("a", "1"));
@@ -729,5 +886,53 @@ mod tests {
         ));
         fs::remove_dir_all(root).unwrap();
         fs::remove_dir_all(src).unwrap();
+    }
+
+    #[test]
+    fn bridge_wraps_the_service_worker_once() {
+        let mut m = json!({ "manifest_version": 3, "background": { "service_worker": "./bg/sw.js" } });
+        let plan = bridge_manifest(&mut m, None).unwrap();
+        assert_eq!(m["background"]["service_worker"], BRIDGE_WORKER);
+        assert_eq!(plan.original.as_deref(), Some("bg/sw.js"));
+        assert_eq!(plan.worker.as_deref(), Some("importScripts(\"burrow_hook.js\", \"bg/sw.js\");\n"));
+        // At the next start the manifest names Burrow's worker; the remembered one is used.
+        let again = bridge_manifest(&mut m, Some("bg/sw.js")).unwrap();
+        assert_eq!(again, plan);
+        // Without the remembered name there is nothing safe to do.
+        assert_eq!(bridge_manifest(&mut m, None), None);
+    }
+
+    #[test]
+    fn bridge_handles_modules_mv2_and_no_background() {
+        let mut m = json!({ "background": { "service_worker": "sw.js", "type": "module" } });
+        let plan = bridge_manifest(&mut m, None).unwrap();
+        assert_eq!(plan.worker.as_deref(), Some("import \"./burrow_hook.js\";\nimport \"./sw.js\";\n"));
+        let mut mv2 = json!({ "background": { "scripts": ["a.js", "b.js"] } });
+        bridge_manifest(&mut mv2, None).unwrap();
+        bridge_manifest(&mut mv2, None).unwrap();
+        assert_eq!(mv2["background"]["scripts"], json!(["burrow_hook.js", "a.js", "b.js"]));
+        assert_eq!(bridge_manifest(&mut json!({ "name": "x" }), None), None);
+        assert_eq!(bridge_manifest(&mut json!({ "background": { "page": "bg.html" } }), None), None);
+    }
+
+    #[test]
+    fn bridge_hook_names_port_and_secret() {
+        let js = bridge_hook(4321, "s3cret");
+        assert!(js.contains("http://127.0.0.1:4321/ext"));
+        assert!(js.contains("SECRET = \"s3cret\""));
+    }
+
+    #[test]
+    fn add_bridge_rewrites_the_folder() {
+        let dir = std::env::temp_dir().join(format!("burrow-bridge-{}", crate::model::new_id()));
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(dir.join("manifest.json"), r#"{"manifest_version":3,"name":"t","version":"1","background":{"service_worker":"sw.js"}}"#).unwrap();
+        assert!(add_bridge(&dir, "// hook").unwrap());
+        assert!(add_bridge(&dir, "// hook 2").unwrap());
+        let m: Value = serde_json::from_slice(&fs::read(dir.join("manifest.json")).unwrap()).unwrap();
+        assert_eq!(m["background"]["service_worker"], BRIDGE_WORKER);
+        assert_eq!(fs::read_to_string(dir.join(BRIDGE_HOOK)).unwrap(), "// hook 2");
+        assert!(fs::read_to_string(dir.join(BRIDGE_WORKER)).unwrap().contains("\"sw.js\""));
+        let _ = fs::remove_dir_all(dir);
     }
 }

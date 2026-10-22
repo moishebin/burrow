@@ -20,7 +20,7 @@ An open-source browser in the spirit of Arc, built with Rust and Chromium (via C
 - **Split View**: two tabs side by side (right-click a tab → Open in Split View). Drag the divider between them to resize.
 - **History** (Ctrl+H), searched as you type in the address box.
 - **Boosts**: your own CSS for a site. Zoom is remembered per site. Videos go fullscreen properly.
-- **Chrome extensions** from the Chrome Web Store (password managers, dark mode, ad blockers, …): open an extension's page in the store and click **Add to Burrow** in the sidebar, then restart Burrow when it asks. The puzzle button at the top of the sidebar opens their popups; **Manage Extensions…** turns them on or off, removes or updates them, or installs one from a folder or `.crx` file.
+- **Chrome extensions** from the Chrome Web Store (password managers, dark mode, ad blockers, …): open an extension's page in the store and click **Add to Burrow** in the sidebar, then restart Burrow when it asks. The puzzle button at the top of the sidebar opens their popups; **Manage Extensions…** turns them on or off, pins them to the toolbar (with their badge, like an unread count), removes or updates them, or installs one from a folder or `.crx` file.
 - **Resizable sidebar**: drag its right edge; double-click the edge for the default width.
 - **Picture in picture** for any video, like Arc: switch away from a tab playing a video and it keeps playing in a small floating window; come back and it returns to the page. Or right-click a tab → Picture in Picture, or Ctrl+Shift+P.
 - **Updates itself** (Windows installer): new versions download in the background and install when you restart or quit. **+ → About and Updates…**
@@ -77,7 +77,7 @@ cargo test -p burrow-core
 
 ## Agents
 
-AI agents can drive Burrow: open, close, move and pin tabs, set up spaces and folders, and read, screenshot, click and type in **any** tab, even one you aren't looking at. They can also set Boosts, search history, set up split views, Air Traffic Control rules and Peek settings, zoom, mute and duplicate tabs, resize or hide the sidebar, minimize, maximize or fullscreen the window, float videos in picture in picture, and install, update, turn on or off and open Chrome extensions. They work in the background, so your own tab stays put. A pulsing **Agent** badge in the sidebar shows when one is working, and **+ → Block Agents from Pages** stops agents from reading or using pages (they can still manage tabs and spaces).
+AI agents can drive Burrow: open, close, move and pin tabs, set up spaces and folders, and read, screenshot, click and type in **any** tab, even one you aren't looking at. They can also set Boosts, search history, set up split views, Air Traffic Control rules and Peek settings, zoom, mute and duplicate tabs, resize or hide the sidebar, minimize, maximize or fullscreen the window, float videos in picture in picture, and install, update, pin, turn on or off and open Chrome extensions. They work in the background, so your own tab stays put. A pulsing **Agent** badge in the sidebar shows when one is working, and **+ → Block Agents from Pages** stops agents from reading or using pages (they can still manage tabs and spaces).
 
 Add Burrow as an MCP server to your agent. For Claude Code:
 

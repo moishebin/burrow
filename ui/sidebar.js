@@ -205,6 +205,7 @@ function renderToolbar() {
   reload.disabled = !view.shown;
   setIcon($("btn-extensions"), "puzzle");
   $("btn-extensions").classList.toggle("on", !!view.extensions.popup);
+  renderExtensionPins();
 }
 
 function renderAddress() {
@@ -1472,10 +1473,38 @@ function renderExtensionPrompts(box) {
   }
 }
 
+/** Pinned extensions get a button in the toolbar, with their badge (D-041). */
+function renderExtensionPins() {
+  const box = $("ext-pins");
+  const pins = view.state.extensions.filter((x) => x.pinned && x.enabled && extRunning(x));
+  const key = JSON.stringify([pins.map((x) => x.id), view.extensions.badges, view.extensions.popup]);
+  if (box.dataset.key === key) return;
+  box.dataset.key = key;
+  box.replaceChildren();
+  for (const x of pins) {
+    const b = el("button", "icon ext-pin");
+    b.classList.toggle("on", view.extensions.popup === x.id);
+    b.title = x.name;
+    b.append(extImage(extIconUrl(x)));
+    const badge = view.extensions.badges[x.id];
+    if (badge) {
+      const s = el("span", "badge", badge.text);
+      if (badge.color) s.style.background = badge.color;
+      b.append(s);
+    }
+    b.onclick = () => act(view.extensions.popup === x.id ? "close_extension_popup" : "open_extension", { id: x.id });
+    b.oncontextmenu = (e) => showMenu(e, [{ label: "Unpin from Toolbar", action: () => act("set_extension_pinned", { id: x.id, pinned: false }) }]);
+    box.append(b);
+  }
+  // Badges of unpinned extensions show as a dot on the puzzle button.
+  const hidden = Object.keys(view.extensions.badges).some((id) => !pins.some((x) => x.id === id));
+  $("btn-extensions").classList.toggle("badged", hidden);
+}
+
 function extensionsMenu(e) {
   const on = view.state.extensions.filter((x) => x.enabled);
   const items = on.map((x) => ({
-    label: extRunning(x) ? x.name : `${x.name} (after restart)`,
+    label: (extRunning(x) ? x.name : `${x.name} (after restart)`) + (view.extensions.badges[x.id] ? `  · ${view.extensions.badges[x.id].text}` : ""),
     img: extIconUrl(x),
     action: () => act("open_extension", { id: x.id }),
   }));
@@ -1527,6 +1556,10 @@ function extensionsDialog() {
           opts.onclick = () => (act("open_url", { url: `chrome-extension://${x.id}/${x.options}` }), closeDialog());
           row.append(opts);
         }
+        const pin = el("button", "link", x.pinned ? "Unpin" : "Pin");
+        pin.title = x.pinned ? "Remove its button from the sidebar's toolbar" : "Show its button, with its badge, in the sidebar's toolbar";
+        pin.onclick = () => act("set_extension_pinned", { id: x.id, pinned: !x.pinned });
+        if (x.enabled) row.append(pin);
         const toggle = el("input");
         toggle.type = "checkbox";
         toggle.checked = x.enabled;

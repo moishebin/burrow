@@ -23,7 +23,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 
 use super::{cef, later, tools::Done, Burrow};
-use crate::{clients, paths, task, views};
+use crate::{agent::Reply, clients, paths, task, views};
 
 /// The popup's browser id, `i32::MAX` while it isn't known yet, or -1 with no popup. Read by
 /// CEF callbacks that must answer at once (keys, console messages).
@@ -64,6 +64,13 @@ pub fn load_extension_switch() -> Option<String> {
     let mut dirs: Vec<String> = enabled.iter().map(|e| root.join(&e.dir).to_string_lossy().into_owned()).collect();
     if dirs.is_empty() {
         return None;
+    }
+    // Burrow's script in each one's background (D-041).
+    let hook = crate::ext_bridge::hook();
+    for e in &enabled {
+        if let Err(err) = ext::add_bridge(&root.join(&e.dir), &hook) {
+            eprintln!("Burrow: could not add the bridge to {}: {err}", e.name);
+        }
     }
     // Burrow's helper, so popups can find the tab the user is on. New secret every run.
     let secret = burrow_core::model::new_id().replace('-', "");
@@ -115,9 +122,27 @@ pub(super) struct Popup {
     size: Size,
 }
 
+/// An extension's badge, as its background set it (D-041): for every tab, and per tab by its
+/// extension tab id.
+#[derive(Default)]
+pub(super) struct Badge {
+    text: String,
+    color: Option<String>,
+    tabs: std::collections::HashMap<i32, String>,
+    tab_colors: std::collections::HashMap<i32, String>,
+}
+
+#[derive(Serialize, Clone)]
+pub(super) struct BadgeView {
+    text: String,
+    color: Option<String>,
+}
+
 /// What the sidebar shows about extensions.
 #[derive(Serialize)]
 pub(super) struct ExtensionsView<'a> {
+    /// Badges for the shown tab, by extension id.
+    badges: std::collections::HashMap<&'a str, BadgeView>,
     /// Ids of the extensions running now.
     running: Vec<&'a str>,
     restart_needed: bool,
@@ -135,11 +160,94 @@ pub(super) struct Install {
 impl Burrow {
     pub(super) fn extensions_view(&self) -> ExtensionsView<'_> {
         ExtensionsView {
+            badges: self.ext_badges.keys().filter_map(|id| Some((id.as_str(), self.badge_for(id)?))).collect(),
             running: self.state.extensions.iter().filter(|e| is_running(e)).map(|e| e.id.as_str()).collect(),
             restart_needed: restart_needed(&self.state),
             installing: self.ext_installs.values().map(|i| i.label.as_str()).collect(),
             popup: self.ext_popup.as_ref().map(|p| p.ext_id.as_str()),
         }
+    }
+
+    /// An extension's badge for the tab the user is on; None when it shows nothing.
+    pub(super) fn badge_for(&self, id: &str) -> Option<BadgeView> {
+        let b = self.ext_badges.get(id)?;
+        let tab = self.shown.as_ref().and_then(|t| self.tabs.get(t)).and_then(|t| t.ext_tab);
+        let text = tab.and_then(|t| b.tabs.get(&t)).unwrap_or(&b.text).clone();
+        let color = tab.and_then(|t| b.tab_colors.get(&t)).or(b.color.as_ref()).cloned();
+        (!text.is_empty()).then_some(BadgeView { text, color })
+    }
+
+    // ---- The bridge (D-041) --------------------------------------------------------------------
+
+    /// A request from Burrow's script in an extension's background (`ext_bridge`).
+    pub fn extension_bridge(&mut self, ext_id: &str, msg: &Value, reply: Reply) {
+        if self.state.extension(ext_id).is_none() {
+            return reply.send(Err("unknown extension".into()));
+        }
+        let tab = msg["tab"].as_i64().map(|t| t as i32);
+        let result = match msg["what"].as_str().unwrap_or_default() {
+            "badge" => {
+                let b = self.ext_badges.entry(ext_id.to_string()).or_default();
+                if let Some(text) = msg.get("text") {
+                    // Chrome's badges hold a few characters; anything else is cut.
+                    let text: String = text.as_str().unwrap_or_default().chars().take(6).collect();
+                    match tab {
+                        Some(t) => b.tabs.insert(t, text),
+                        None => Some(std::mem::replace(&mut b.text, text)),
+                    };
+                }
+                if let Some(color) = msg["color"].as_str().filter(|c| c.len() < 40 && !c.contains([';', '{', '}'])) {
+                    match tab {
+                        Some(t) => b.tab_colors.insert(t, color.to_string()),
+                        None => b.color.replace(color.to_string()),
+                    };
+                }
+                self.push_state();
+                Ok(Value::Null)
+            }
+            "open" => {
+                let url = msg["url"].as_str().unwrap_or_default();
+                // Relative addresses are pages of the extension itself; an empty one is a new tab.
+                let url = if url.is_empty() {
+                    "about:blank".to_string()
+                } else if url.contains("://") || url.starts_with("about:") || url.starts_with("data:") {
+                    url.to_string()
+                } else {
+                    format!("chrome-extension://{ext_id}/{}", url.trim_start_matches('/'))
+                };
+                if url.starts_with("javascript:") || url.starts_with("file:") {
+                    Err("not allowed".to_string())
+                } else {
+                    let space = self.state.active_space.clone();
+                    self.open_in_space(url, &space, msg["active"].as_bool() != Some(false));
+                    Ok(Value::Null)
+                }
+            }
+            "tabs" => return self.answer_bridge_tabs(reply, 0),
+            w => Err(format!("unknown request `{w}`")),
+        };
+        reply.send(result);
+    }
+
+    /// The tab the user is on and the space's tabs, by extension tab id. Right after a start the
+    /// pages haven't told their ids yet (the helper's content script does), so wait a little.
+    fn answer_bridge_tabs(&mut self, reply: Reply, tries: u32) {
+        let shown = self.shown.as_ref().and_then(|t| self.tabs.get(t));
+        let active = shown.and_then(|t| t.ext_tab);
+        if active.is_none() && shown.is_some() && tries < 30 {
+            return task::post_ui_delayed(100, move || {
+                super::with(|b| b.answer_bridge_tabs(reply, tries + 1));
+            });
+        }
+        reply.send(Ok(json!({ "active": active, "all": self.profile_tab_ids(active) })));
+    }
+
+    pub fn set_extension_pinned(&mut self, id: &str, pinned: bool) -> bool {
+        if !self.state.set_extension_pinned(id, pinned) {
+            return false;
+        }
+        self.changed();
+        true
     }
 
     // ---- Installing ---------------------------------------------------------------------------
@@ -500,6 +608,7 @@ impl Burrow {
                         "id": e.id, "name": e.name, "version": e.version, "description": e.description,
                         "enabled": e.enabled, "running": is_running(e), "source": e.source,
                         "has_popup": e.popup.is_some(), "options_url": e.options.as_ref().map(|o| e.url(o)),
+                        "pinned": e.pinned, "badge": b.badge_for(&e.id).map(|v| v.text),
                     })
                 })
                 .collect();
@@ -533,6 +642,10 @@ impl Burrow {
                 self.set_extension_enabled(&e.id, a == "enable");
                 json!({ "id": e.id, "enabled": a == "enable", "restart_needed": restart_needed(&self.state) })
             }),
+            a @ ("pin" | "unpin") => which(self).map(|e| {
+                self.set_extension_pinned(&e.id, a == "pin");
+                json!({ "id": e.id, "pinned": a == "pin" })
+            }),
             "remove" => which(self).map(|e| {
                 self.remove_extension(&e.id);
                 json!({ "removed": e.id, "restart_needed": restart_needed(&self.state) })
@@ -550,7 +663,7 @@ impl Burrow {
                 done(self, Ok(json!({ "restarting": true })));
                 return self.restart();
             }
-            a => Err(format!("unknown action `{a}` (use list, install, update, enable, disable, remove, open, close or restart)")),
+            a => Err(format!("unknown action `{a}` (use list, install, update, enable, disable, pin, unpin, remove, open, close or restart)")),
         };
         done(self, result);
     }

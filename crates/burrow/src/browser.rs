@@ -260,6 +260,8 @@ pub struct Burrow {
     divider: Option<divider::Divider>,
     /// Dialogs over the whole window (D-039).
     modal: Option<modal::Modal>,
+    /// Extensions' badges, by extension id (D-041).
+    ext_badges: HashMap<String, extensions::Badge>,
 }
 
 /// Messages from the sidebar that aren't model commands.
@@ -321,6 +323,8 @@ enum Act {
     /// Ask for an extension folder, or a .crx/.zip file, and install it.
     ChooseExtensionFile { folder: bool },
     SetExtensionEnabled { id: String, enabled: bool },
+    /// Show an extension's button in the toolbar (D-041).
+    SetExtensionPinned { id: String, pinned: bool },
     RemoveExtension { id: String },
     UpdateExtensions,
     Restart,
@@ -421,9 +425,11 @@ pub fn start() {
             updater: Default::default(),
             divider: None,
             modal: None,
+            ext_badges: HashMap::new(),
         })
     });
     crate::agent::start_server();
+    crate::ext_bridge::start();
 
     let mut window_delegate = views::MainWindowDelegate::new();
     window_create_top_level(Some(&mut window_delegate));
@@ -783,6 +789,9 @@ impl Burrow {
             Act::ChooseExtensionFile { folder } => self.choose_extension_file(folder),
             Act::SetExtensionEnabled { id, enabled } => {
                 self.set_extension_enabled(&id, enabled);
+            }
+            Act::SetExtensionPinned { id, pinned } => {
+                self.set_extension_pinned(&id, pinned);
             }
             Act::RemoveExtension { id } => {
                 self.remove_extension(&id);

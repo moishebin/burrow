@@ -332,3 +332,18 @@ html.modal, html.modal body { height: auto; overflow: auto; background: #fff; }
 .modal .history .row { flex: none; }
 .modal .ext-list { max-height: 400px; }
 .modal .rules { max-height: 260px; }
+
+/* ---- pinned extensions and badges (D-041) ---- */
+#ext-pins { display: flex; gap: 2px; min-width: 0; overflow: hidden; }
+#ext-pins:empty { display: none; }
+.ext-pin { position: relative; }
+.ext-pin img, .ext-pin .ico { width: 16px; height: 16px; object-fit: contain; }
+.ext-pin.on { background: var(--pressed); }
+.ext-pin .badge {
+  position: absolute; right: -1px; bottom: 0; min-width: 14px; height: 13px; padding: 0 3px; border-radius: 7px;
+  background: #d93025; color: #fff; font-size: 9px; font-weight: 700; line-height: 13px; text-align: center;
+}
+#btn-extensions { position: relative; }
+#btn-extensions.badged::after {
+  content: ""; position: absolute; right: 4px; top: 4px; width: 6px; height: 6px; border-radius: 3px; background: #d93025;
+}

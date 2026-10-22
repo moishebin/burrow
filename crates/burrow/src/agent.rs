@@ -89,20 +89,20 @@ pub fn stop_server() {
     }
 }
 
-struct Request {
-    method: String,
-    path: String,
+pub(crate) struct Request {
+    pub method: String,
+    pub path: String,
     headers: Vec<(String, String)>,
-    body: Vec<u8>,
+    pub body: Vec<u8>,
 }
 
 impl Request {
-    fn header(&self, name: &str) -> Option<&str> {
+    pub fn header(&self, name: &str) -> Option<&str> {
         self.headers.iter().find(|(k, _)| k.eq_ignore_ascii_case(name)).map(|(_, v)| v.as_str())
     }
 }
 
-fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
+pub(crate) fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
     let mut reader = BufReader::new(stream);
     let mut line = String::new();
     reader.read_line(&mut line).map_err(|e| e.to_string())?;
@@ -132,6 +132,11 @@ fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
 }
 
 fn respond(stream: &mut TcpStream, status: u16, body: &Value) {
+    respond_with(stream, status, body, "");
+}
+
+/// `extra` is more header lines, each ending in `\r\n`.
+pub(crate) fn respond_with(stream: &mut TcpStream, status: u16, body: &Value, extra: &str) {
     let body = body.to_string();
     let reason = match status {
         200 => "OK",
@@ -142,7 +147,7 @@ fn respond(stream: &mut TcpStream, status: u16, body: &Value) {
         _ => "Error",
     };
     let head = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n{extra}Connection: close\r\n\r\n",
         body.len()
     );
     let _ = stream.write_all(head.as_bytes()).and_then(|_| stream.write_all(body.as_bytes()));
@@ -196,10 +201,15 @@ fn serve(mut stream: TcpStream, token: &str, port: u16) {
 }
 
 fn call_on_ui(tool: String, args: Value) -> Result<Value, String> {
+    run_on_ui(move |b, reply| b.agent_call(&tool, args, reply))
+}
+
+/// Runs `f` with the controller on the UI thread and waits for its answer.
+pub(crate) fn run_on_ui(f: impl FnOnce(&mut browser::Burrow, Reply) + Send + 'static) -> Result<Value, String> {
     let (tx, rx) = mpsc::channel();
     let reply = Reply(tx);
     task::post_ui(move || {
-        browser::with(|b| b.agent_call(&tool, args, reply));
+        browser::with(|b| f(b, reply));
     });
     match rx.recv_timeout(CALL_TIMEOUT) {
         Ok(r) => r,
