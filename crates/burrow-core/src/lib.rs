@@ -11,6 +11,7 @@ pub mod links;
 pub mod model;
 pub mod omnibox;
 pub mod store;
+pub mod update;
 
 pub use commands::{Command, CommandError, Effect, Location};
 pub use model::{Folder, Id, Node, Profile, Route, Section, Settings, Space, Split, State, Tab};

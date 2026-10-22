@@ -60,7 +60,7 @@ Priority: **P0** = needed to switch from Arc · P1 = soon after · P2 = later
 | Split view | ✅ | Two tabs (D-026). Not resizable yet. |
 | Password saving / autofill | 🟡 | Alloy has no built-in password UI (D-010). A password manager extension works (Bitwarden's popup verified, D-032); no built-in manager. |
 | Default-browser registration on Windows | 🟡 | D-024. + → Make Burrow Your Default Browser… writes per-user registry entries and opens Settings. Links hand over to a running Burrow (verified on Linux, and on Windows with the 0.0.2 installer, D-031). The registry part isn't checked by hand yet. |
-| Installer + auto-update | 🟡 | Windows setup .exe: per-user, Start menu, *Settings → Apps* uninstall, updates in place (D-030). Verified install/upgrade/uninstall on Windows. Zip and Linux archive too (D-020); the zip runs on a clean PC (D-029). Not code-signed yet (ready via `BURROW_SIGN`); no auto-update yet. |
+| Installer + auto-update | 🟡 | Windows setup .exe: per-user, Start menu, *Settings → Apps* uninstall, updates in place (D-030). Verified install/upgrade/uninstall on Windows. Zip and Linux archive too (D-020); the zip runs on a clean PC (D-029). Not code-signed yet (ready via `BURROW_SIGN`). Auto-update: D-037. |
 | Launching Burrow again focuses the running window | ✅ | D-029. Verified on Windows: restores a minimized window, no second window. |
 | Exe file icon (Explorer) | ✅ | `build.rs` + embed-resource (llvm-rc) |
 | Zoom indicator, per-site zoom memory | ✅ | D-026 |

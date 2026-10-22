@@ -55,7 +55,9 @@ fn main() {
     shutdown();
     // "Restart Burrow" (to load changed extensions, D-032): start again now that this process
     // has let go of the profile. Links it was started with aren't opened twice.
-    if browser::restart_requested() {
+    // A downloaded update installs now (D-037); its installer starts Burrow again if asked to.
+    let updating = browser::run_pending_install(browser::restart_requested());
+    if !updating && browser::restart_requested() {
         let flags = std::env::args().skip(1).filter(|a| a.starts_with("--") && !a.starts_with("--load-extension"));
         if let Err(e) = std::process::Command::new(std::env::current_exe().unwrap_or_default()).args(flags).spawn() {
             eprintln!("Burrow: could not restart: {e}");

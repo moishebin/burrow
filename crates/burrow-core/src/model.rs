@@ -103,6 +103,9 @@ pub struct Settings {
     /// Leaving a tab whose video plays with sound floats the video in picture in picture (D-036).
     #[serde(default = "yes")]
     pub auto_pip: bool,
+    /// Check for new versions on GitHub after starting and every six hours (D-037).
+    #[serde(default = "yes")]
+    pub auto_update: bool,
 }
 
 pub const SIDEBAR_WIDTH_DEFAULT: u32 = 264;
@@ -137,6 +140,7 @@ impl Default for Settings {
             peek_from_pinned: true,
             sidebar_width: SIDEBAR_WIDTH_DEFAULT,
             auto_pip: true,
+            auto_update: true,
         }
     }
 }

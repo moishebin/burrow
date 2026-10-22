@@ -20,11 +20,13 @@ mod icons;
 mod peek;
 mod pip;
 mod tools;
+mod update;
 mod window_buttons;
 
 pub use extensions::{helper_tab_id, is_popup_browser, load_extension_switch, restart_requested, POPUP_PREFIX};
 pub use peek::is_peek_browser;
 pub use pip::BINDING as PIP_BINDING;
+pub use update::run_pending_install;
 
 thread_local! {
     static BURROW: RefCell<Option<Burrow>> = const { RefCell::new(None) };
@@ -250,6 +252,7 @@ pub struct Burrow {
     window_buttons: Option<window_buttons::WindowButtons>,
     /// The tab whose video is in picture in picture, as far as Burrow knows (D-036).
     pip_tab: Option<Id>,
+    updater: update::Updater,
 }
 
 /// Messages from the sidebar that aren't model commands.
@@ -317,6 +320,10 @@ enum Act {
     /// Float the tab's video in picture in picture, or put it back (D-036).
     TogglePip { tab_id: Id },
     SetAutoPip { on: bool },
+    /// Updates (D-037).
+    CheckForUpdates,
+    InstallUpdate,
+    SetAutoUpdate { on: bool },
 }
 
 /// Starts Burrow: loads the state and creates the main window. Called once, on the UI thread.
@@ -393,6 +400,7 @@ pub fn start() {
             next_install: 1,
             window_buttons: None,
             pip_tab: None,
+            updater: Default::default(),
         })
     });
     crate::agent::start_server();
@@ -458,6 +466,7 @@ impl Burrow {
         self.sync_view();
         window.show();
         self.create_window_buttons();
+        self.schedule_update_checks();
         self.archive_tick();
         // Links that started Burrow (Burrow as the default browser).
         for url in crate::external::take_startup_urls() {
@@ -760,6 +769,17 @@ impl Burrow {
             Act::TogglePip { tab_id } => self.toggle_pip(&tab_id),
             Act::SetAutoPip { on } => {
                 self.state.settings.auto_pip = on;
+                self.changed();
+            }
+            Act::CheckForUpdates => self.check_for_update(true, None),
+            Act::InstallUpdate => {
+                if let Err(e) = self.install_update() {
+                    self.toast = Some(e);
+                    self.push_state();
+                }
+            }
+            Act::SetAutoUpdate { on } => {
+                self.state.settings.auto_update = on;
                 self.changed();
             }
         }
@@ -1761,6 +1781,7 @@ impl Burrow {
                 fullscreen: bool,
                 windows: bool,
                 pip: Option<&'a str>,
+                update: update::UpdateView<'a>,
                 extensions: extensions::ExtensionsView<'a>,
             }
             let view = View {
@@ -1799,6 +1820,7 @@ impl Burrow {
                 fullscreen: b.fullscreen,
                 windows: cfg!(target_os = "windows"),
                 pip: b.pip_tab.as_deref(),
+                update: b.update_view(),
                 extensions: b.extensions_view(),
             };
             match serde_json::to_string(&view) {

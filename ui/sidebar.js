@@ -562,6 +562,7 @@ const PERMISSION_TEXT = {
 function renderPrompts() {
   const box = $("prompts");
   box.replaceChildren();
+  renderUpdatePrompt(box);
   renderExtensionPrompts(box);
   for (const p of view.permissions || []) {
     const card = el("div", "prompt");
@@ -941,6 +942,39 @@ function archiveDialog() {
   });
 }
 
+function updateDialog() {
+  openDialog((d) => {
+    d.append(el("h2", null, "Burrow " + view.update.current));
+    const status = el("p");
+    const check = el("button", "btn", "Check Now");
+    check.onclick = () => act("check_for_updates");
+    const fill = () => {
+      const u = view.update;
+      check.disabled = u.checking || u.downloading;
+      status.textContent = u.checking ? "Checking for updates…"
+        : u.ready ? `Burrow ${u.available} is downloaded. It installs when you restart or quit Burrow.`
+        : u.downloading ? `Downloading Burrow ${u.available}…`
+        : u.available ? `Burrow ${u.available} is out.` + (u.installable ? "" : " This copy can't update itself; download it from the release page.")
+        : "Burrow checks GitHub for new versions after it starts and every six hours.";
+    };
+    fill();
+    dialogRefresh = fill;
+    d.append(status);
+    const l = el("label", "check");
+    const auto = el("input");
+    auto.type = "checkbox";
+    auto.checked = view.state.settings.auto_update;
+    auto.onchange = () => act("set_auto_update", { on: auto.checked });
+    l.append(auto, document.createTextNode("Check for updates automatically"));
+    d.append(l);
+    const row = el("div", "buttons");
+    const close = el("button", "btn primary", "Close");
+    close.onclick = closeDialog;
+    row.append(check, close);
+    d.append(row);
+  });
+}
+
 function addMenu(e) {
   showMenu(e, [
     { label: "New Space…", action: newSpaceDialog },
@@ -958,6 +992,7 @@ function addMenu(e) {
     },
     { label: "Extensions…", action: extensionsDialog },
     { label: "Keyboard Shortcuts", action: shortcutsDialog },
+    { label: view.update.ready ? `Restart to Update to ${view.update.available}` : "About and Updates…", action: view.update.ready ? () => act("install_update") : updateDialog },
     {
       label: view.state.settings.agent_page_access ? "Block Agents from Pages" : "Let Agents Read and Use Pages",
       action: () => act("set_agent_page_access", { on: !view.state.settings.agent_page_access }),
@@ -1364,6 +1399,24 @@ function extImage(url, cls) {
 }
 
 let restartLater = null; // the extension list the user said "Later" to
+let updateLater = null; // the version the user said "Later" to
+
+function renderUpdatePrompt(box) {
+  const u = view.update;
+  if (!u.available || updateLater === u.available || (u.installable && !u.ready)) return;
+  const card = el("div", "prompt");
+  card.append(el("div", "what", u.ready
+    ? `Burrow ${u.available} is ready. Restart to update, or it installs when you quit.`
+    : `Burrow ${u.available} is out.`));
+  const buttons = el("div", "buttons");
+  const later = el("button", "btn", "Later");
+  later.onclick = () => ((updateLater = u.available), render());
+  const go = el("button", "btn allow", u.ready ? "Restart" : "Download");
+  go.onclick = () => (u.ready ? act("install_update") : act("open_url", { url: u.page }));
+  buttons.append(el("label"), later, go);
+  card.append(buttons);
+  box.append(card);
+}
 
 function renderExtensionPrompts(box) {
   const xv = view.extensions;

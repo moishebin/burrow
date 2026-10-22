@@ -125,6 +125,13 @@ Section "Install"
   WriteRegDWORD HKCU "${UNINST_KEY}" "NoRepair" 1
   ${GetSize} "$INSTDIR" "/S=0K" $0 $1 $2
   WriteRegDWORD HKCU "${UNINST_KEY}" "EstimatedSize" $0
+
+  ; Burrow's updater runs `setup.exe /S /RELAUNCH` after "Restart to Update" (D-037).
+  ${GetParameters} $0
+  ClearErrors
+  ${GetOptions} $0 "/RELAUNCH" $1
+  IfErrors +2 0
+    Exec '"$INSTDIR\burrow.exe"'
 SectionEnd
 
 Section "Uninstall"

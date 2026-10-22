@@ -323,6 +323,19 @@ pub const TOOLS: &[Tool] = &[
         },
     },
     Tool {
+        name: "update",
+        description: "Burrow's own updates. status = the running version and any newer release (and whether its installer is downloaded and checked); check = ask GitHub now; install = restart Burrow into the downloaded update (only when the user agrees: the window closes and comes back). auto turns the automatic checks on or off.",
+        schema: || {
+            object(
+                json!({
+                    "action": { "type": "string", "enum": ["status", "check", "install"], "description": "Default status." },
+                    "auto": { "type": "boolean" }
+                }),
+                &[],
+            )
+        },
+    },
+    Tool {
         name: "window",
         description: "Get or change Burrow's window: minimize, maximize, restore, fullscreen on or off, or show_buttons (slides out the minimize/maximize/close buttons in the top-right corner for two seconds, as hovering does). Change it only when the user asks. Default status.",
         schema: || {

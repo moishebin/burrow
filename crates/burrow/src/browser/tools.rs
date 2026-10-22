@@ -77,6 +77,9 @@ impl Burrow {
         if tool == "picture_in_picture" {
             return self.agent_pip(&args, done);
         }
+        if tool == "update" {
+            return self.agent_update(&args, done);
+        }
         if let Some(result) = self.app_tool(tool, &args) {
             return done(self, result);
         }
