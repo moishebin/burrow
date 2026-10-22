@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Burrow sidebar</title>
+  <link rel="stylesheet" href="sidebar.css">
+</head>
+<body>
+  <div id="sidebar">
+    <div id="toolbar">
+      <button class="icon" id="btn-toggle" title="Hide sidebar (Ctrl+S). Point at the left edge to bring it back."></button>
+      <button class="icon" id="btn-back" title="Back (Alt+←)"></button>
+      <button class="icon" id="btn-forward" title="Forward (Alt+→)"></button>
+      <button class="icon" id="btn-reload" title="Reload (Ctrl+R)"></button>
+      <span class="grow"></span>
+      <span id="window-buttons" hidden>
+        <button class="icon win" id="btn-min" title="Minimize"></button>
+        <button class="icon win" id="btn-max" title="Maximize"></button>
+        <button class="icon win close" id="btn-close" title="Close"></button>
+      </span>
+    </div>
+
+    <form id="address" autocomplete="off">
+      <span id="address-lock" class="lock"></span>
+      <input id="address-input" spellcheck="false" placeholder="Search or enter address">
+      <span id="find-count" hidden></span>
+    </form>
+    <div id="suggest" hidden></div>
+
+    <div id="prompts"></div>
+
+    <div id="favorites" class="drop-zone"></div>
+
+    <div id="scroll">
+      <div id="space-header">
+        <span id="space-icon"></span>
+        <span id="space-name"></span>
+        <button class="icon small" id="btn-space-menu" title="Space options"></button>
+      </div>
+      <div id="pinned" class="tree"></div>
+      <div id="divider"><span class="line"></span><button id="btn-clear" title="Close all unpinned tabs">Clear</button></div>
+      <button id="new-tab" class="row"><span class="ico plus"></span><span class="label">New Tab</span></button>
+      <div id="today" class="tree"></div>
+    </div>
+
+    <div id="bottombar">
+      <button class="icon" id="btn-downloads" title="Downloads"></button>
+      <div id="spaces"></div>
+      <button class="icon" id="btn-add" title="New space, import, settings"></button>
+    </div>
+  </div>
+
+  <div id="menu" hidden></div>
+  <div id="dialog-backdrop" hidden><div id="dialog"></div></div>
+  <div id="toast" hidden></div>
+
+  <script src="icons.js"></script>
+  <script src="sidebar.js"></script>
+</body>
+</html>

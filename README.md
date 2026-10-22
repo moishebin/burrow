@@ -1,0 +1,70 @@
+# Burrow
+
+An open-source browser in the spirit of Arc, built with Rust and Chromium (via CEF), with no Google services.
+
+*Every tab has its place.*
+
+> **⚠️ Work in progress.** Burrow is an early, personal project, shared as open source in the hope that it's useful.
+> There is **no commitment** to respond to issues or review pull requests, though both are welcome.
+> I'll try to maintain it for as long as I can.
+
+- **Spaces in one window.** Each space has its own pinned tabs, folders and favorites, and can have its **own logins** (a separate browser profile). Switch spaces from the bottom of the sidebar or with Ctrl+1…9.
+- **Pinned tabs that stay put.** A pinned tab keeps its home URL. Browse anywhere inside it, then click ↺ (or close it) and it goes back home, in the same spot.
+- **Folders** for pinned tabs, nested as deep as you like. Drag and drop to organise.
+- **Favorites**: the app tiles at the top, separate for each space.
+- **Today**: unpinned tabs live below the line and are auto-archived after 12 hours of disuse (configurable). Ctrl+Shift+T brings them back.
+- **Import from Arc**: spaces, folders, pinned tabs and favorites from Arc's local data (Windows).
+- **One window, always.** Popups and "open in new window" become tabs.
+
+Status: early, but usable day to day on Windows. See [docs/FEATURES.md](docs/FEATURES.md) for what works and what doesn't yet, and [docs/DECISIONS.md](docs/DECISIONS.md) for the reasoning behind each choice.
+
+## Building
+
+Burrow is developed in WSL/Linux and cross-compiled for Windows.
+
+```sh
+rustup target add x86_64-pc-windows-msvc
+cargo install cargo-xwin
+# clang, lld and llvm-lib on PATH; scripts/build-win.sh looks in ~/.local/llvm/bin
+scripts/build-win.sh            # builds and copies to %LOCALAPPDATA%\Burrow-dev\app
+scripts/run-win.sh              # starts it with a throwaway profile and DevTools on :9222
+scripts/run-win.sh --real       # starts it with your real profile (%LOCALAPPDATA%\Burrow)
+```
+
+The first build downloads CEF (~400 MB) to `~/.local/share/cef`.
+
+Tests for the model (no browser needed):
+
+```sh
+cargo test -p burrow-core
+```
+
+## Layout
+
+| Path | What |
+|---|---|
+| `crates/burrow-core` | Model and logic: spaces, folders, tabs, commands, persistence, Arc import. Pure Rust, unit-tested. |
+| `crates/burrow` | The app: CEF setup, window, tabs, profiles, handlers. |
+| `ui/` | The sidebar (HTML/CSS/JS, no build step). |
+| `scripts/` | Build, run and DevTools helpers. |
+| `docs/` | Decisions and the feature tracker. |
+
+## Keyboard
+
+| Keys | Action |
+|---|---|
+| Ctrl+T | New tab (also searches your open tabs) |
+| Ctrl+L | Edit address |
+| Ctrl+W | Close tab (pinned: unload) |
+| Ctrl+D | Pin / unpin |
+| Ctrl+1…9 | Switch space |
+| Ctrl+Tab | Next tab |
+| Ctrl+S | Hide / show sidebar |
+| Ctrl+F | Find in page |
+| Ctrl+Shift+T | Reopen closed tab |
+| Alt+← / → | Back / forward |
+| F12 | DevTools |
+
+## License
+
+[MPL-2.0](LICENSE). Burrow is not affiliated with The Browser Company; "Arc" is their trademark.

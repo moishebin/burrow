@@ -1,0 +1,21 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+repository = "https://github.com/moishebin/burrow"
+
+[workspace.dependencies]
+burrow-core = { path = "crates/burrow-core" }
+cef = "154.5.0"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+thiserror = "2"
+
+[profile.release]
+lto = "thin"
+codegen-units = 4

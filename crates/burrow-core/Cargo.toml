@@ -1,0 +1,12 @@
+[package]
+name = "burrow-core"
+description = "Burrow's browser-independent model: spaces, folders, pinned tabs, favorites."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+uuid.workspace = true
+thiserror.workspace = true

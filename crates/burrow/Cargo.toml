@@ -1,0 +1,20 @@
+[package]
+name = "burrow"
+description = "Burrow: an open-source, Arc-style browser built on CEF."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "burrow"
+path = "src/main.rs"
+
+[dependencies]
+burrow-core.workspace = true
+cef.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+arboard = { version = "3", default-features = false }
+
+[build-dependencies]
+embed-resource = "3"
