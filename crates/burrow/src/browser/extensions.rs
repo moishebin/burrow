@@ -327,7 +327,7 @@ impl Burrow {
         let mut context = Some(profile.context.clone());
         let tab = self.shown.as_ref().and_then(|t| self.tabs.get(t)).and_then(|t| t.ext_tab);
         let mut client = clients::ContentClient::new();
-        let mut delegate = views::TabViewDelegate::new();
+        let mut delegate = views::TabViewDelegate::new(false);
         // Blank first: the script that fixes `chrome.tabs` must be in place before the page runs.
         let view = browser_view_create(
             Some(&mut client),

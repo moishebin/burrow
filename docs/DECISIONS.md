@@ -370,4 +370,14 @@ Releases are GitHub releases tagged `v<version>`, with the archives attached. Th
 - `BURROW_UPDATE_URL` points the check at another server answering the same JSON (for testing).
 - Agents: the `update` tool (status, check, install, auto on/off).
 
-**Verified** on Linux/Xvfb against a local fake release (0.0.99): the automatic check found it; with the install path forced on for the test, the setup downloaded, passed the checksum and the Restart card appeared; a wrong checksum deleted the file and reported it; without the install path, the "is out" card with Download appeared. A real check against GitHub reported 0.0.2 as current. The Windows install step (`/S /RELAUNCH`) is checked in D-038.
+**Verified** on Linux/Xvfb against a local fake release (0.0.99): the automatic check found it; with the install path forced on for the test, the setup downloaded, passed the checksum and the Restart card appeared; a wrong checksum deleted the file and reported it; without the install path, the "is out" card with Download appeared. A real check against GitHub reported 0.0.2 as current. The Windows install step (`/S /RELAUNCH`) is verified on Windows separately (see the Windows check entry after this one).
+
+## D-038 · Resizable split view (2026-10-22)
+
+**Decision.** A split has a `ratio`, the left tab's share of the width (0.15–0.85, default 0.5, saved; `Command::SetSplitRatio`). Between the two tabs sits a **divider** as wide as the gap between cards (8 px), painted in the content card's tint. Dragging it moves the split live, and it is saved on release; double-clicking gives equal halves. CEF's native views have no mouse-move events, so the divider is a tiny page (`ui/divider.html`, on `burrow://`), the same trick as the sidebar's resizable edge (D-033): pointer capture keeps the drag going outside its 8 px, and it reports one movement per frame through the sidebar's message channel. It is created the first time a split shows and closes with the window.
+
+The content area is a box layout. Its flex weights share out the *difference* from each view's preferred width, and a BrowserView's preferred width is large, so the weights worked backwards at first (a 0.81 split showed as 0.18). Tabs and Peeks now report a 1×1 preferred size and take what the layout gives them. Extension popups keep their natural, auto-resized size (`TabViewDelegate { fills }`).
+
+Agents: `split_view` takes `ratio` when opening and has a `resize` action.
+
+**Verified** on Linux/Xvfb: the divider sits exactly at the saved ratio (0.8125 → x 1174 of a 1120 px area starting at 264); a real mouse drag of −400 px landed where computed; double-click reset to halves and saved; the agent's resize to 0.25 applied at once; a Peek still lays out as before.

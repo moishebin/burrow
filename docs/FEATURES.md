@@ -57,7 +57,7 @@ Priority: **P0** = needed to switch from Arc · P1 = soon after · P2 = later
 | Favicon cache on disk (show icons for never-loaded tabs offline) | ✅ | D-025 |
 | Command bar with history search | ✅ | Address box: open tabs, then history (D-023) |
 | Peek / little browser for links from pinned tabs | ✅ | D-022 |
-| Split view | ✅ | Two tabs (D-026). Not resizable yet. |
+| Split view | ✅ | Two tabs (D-026). Drag the divider to resize, double-click for halves (D-038). |
 | Password saving / autofill | 🟡 | Alloy has no built-in password UI (D-010). A password manager extension works (Bitwarden's popup verified, D-032); no built-in manager. |
 | Default-browser registration on Windows | 🟡 | D-024. + → Make Burrow Your Default Browser… writes per-user registry entries and opens Settings. Links hand over to a running Burrow (verified on Linux, and on Windows with the 0.0.2 installer, D-031). The registry part isn't checked by hand yet. |
 | Installer + auto-update | 🟡 | Windows setup .exe: per-user, Start menu, *Settings → Apps* uninstall, updates in place (D-030). Verified install/upgrade/uninstall on Windows. Zip and Linux archive too (D-020); the zip runs on a clean PC (D-029). Not code-signed yet (ready via `BURROW_SIGN`). Auto-update: D-037. |

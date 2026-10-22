@@ -79,7 +79,7 @@ impl Burrow {
         }
         let mut context = Some(profile.context.clone());
         let mut client = clients::ContentClient::new();
-        let mut delegate = views::TabViewDelegate::new();
+        let mut delegate = views::TabViewDelegate::new(true);
         let Some(view) = browser_view_create(
             Some(&mut client),
             Some(&cef(&url)),

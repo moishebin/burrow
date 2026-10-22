@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{clients, consts, paths, task, views, writer};
 
+mod divider;
 mod extensions;
 mod icons;
 mod peek;
@@ -253,6 +254,8 @@ pub struct Burrow {
     /// The tab whose video is in picture in picture, as far as Burrow knows (D-036).
     pip_tab: Option<Id>,
     updater: update::Updater,
+    /// The split view's divider, made the first time a split shows (D-038).
+    divider: Option<divider::Divider>,
 }
 
 /// Messages from the sidebar that aren't model commands.
@@ -324,6 +327,10 @@ enum Act {
     CheckForUpdates,
     InstallUpdate,
     SetAutoUpdate { on: bool },
+    /// The split view's divider is dragged `dx` pixels (phase start, move or end), D-038.
+    SplitDrag { dx: f64, phase: String },
+    /// Double-click on the divider: equal halves.
+    SplitReset,
 }
 
 /// Starts Burrow: loads the state and creates the main window. Called once, on the UI thread.
@@ -350,10 +357,10 @@ pub fn start() {
     .expect("create sidebar");
 
     let content = panel_create(None).expect("create content panel");
-    // Hidden tabs are skipped by the layout, so one tab fills the area and two split it.
+    // Hidden tabs are skipped by the layout, so one tab fills the area and two split it, with
+    // the divider between them as the gap (D-038).
     content.set_to_box_layout(Some(&BoxLayoutSettings {
         horizontal: 1,
-        between_child_spacing: consts::CARD_MARGIN,
         cross_axis_alignment: AxisAlignment::STRETCH,
         default_flex: 1,
         ..Default::default()
@@ -401,6 +408,7 @@ pub fn start() {
             window_buttons: None,
             pip_tab: None,
             updater: Default::default(),
+            divider: None,
         })
     });
     crate::agent::start_server();
@@ -535,6 +543,12 @@ impl Burrow {
             }
             if let Some(host) = self.sidebar.browser().and_then(|b| b.host()) {
                 host.close_browser(1);
+            }
+            if let Some(b) = self.divider_browser() {
+                self.dying_peeks.push(b.identifier());
+                if let Some(host) = b.host() {
+                    host.close_browser(1);
+                }
             }
         }
         false
@@ -782,6 +796,8 @@ impl Burrow {
                 self.state.settings.auto_update = on;
                 self.changed();
             }
+            Act::SplitDrag { dx, phase } => self.split_drag(dx, &phase),
+            Act::SplitReset => self.set_split_ratio(0.5, true),
         }
     }
 
@@ -917,11 +933,12 @@ impl Burrow {
                     t.view.set_visible(1);
                 }
             }
-            let focus = want != self.shown;
             let left: Vec<Id> = self.visible.iter().filter(|id| !visible.contains(id)).cloned().collect();
             let back = self.pip_tab.clone().filter(|p| visible.contains(p) && !self.visible.contains(p));
+            let focus = want != self.shown;
             self.shown = want;
             self.visible = visible;
+            self.layout_split();
             self.content.layout();
             if focus {
                 self.focus_content();
@@ -938,6 +955,10 @@ impl Burrow {
         } else if self.shown.is_none() {
             // E.g. the last tab was just closed: keep keyboard focus somewhere that has shortcuts.
             self.sidebar.request_focus();
+        } else if self.visible.len() == 2 {
+            // The same split, maybe with its divider moved (by an agent, say).
+            self.layout_split();
+            self.content.layout();
         }
         self.apply_theme();
     }
@@ -960,7 +981,7 @@ impl Burrow {
         }
         let mut context = Some(profile.context.clone());
         let mut client = clients::ContentClient::new();
-        let mut delegate = views::TabViewDelegate::new();
+        let mut delegate = views::TabViewDelegate::new(true);
         let Some(view) = browser_view_create(
             Some(&mut client),
             Some(&cef(&url)),
@@ -1022,6 +1043,7 @@ impl Burrow {
                 t.view.set_visible(1);
             }
         }
+        self.layout_split();
         self.content.layout();
         self.focus_content();
         self.schedule_icon_scan();
@@ -1345,6 +1367,7 @@ impl Burrow {
             w.set_title(Some(&cef(&title)));
         }
         self.layout_window_buttons();
+        self.paint_divider();
     }
 
     // ---- Keyboard ---------------------------------------------------------------------------

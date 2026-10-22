@@ -208,14 +208,15 @@ pub const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "split_view",
-        description: "Show two tabs of one space side by side (Split View), or end a split. A split shows whenever one of its tabs is the active tab; this never changes which tab the user is looking at.",
+        description: "Show two tabs of one space side by side (Split View), move the divider between them (resize), or end a split. A split shows whenever one of its tabs is the active tab; this never changes which tab the user is looking at.",
         schema: || {
             object(
                 json!({
-                    "action": { "type": "string", "enum": ["open", "close"], "description": "Default open." },
-                    "tab_id": { "type": "string", "description": "open: the left tab. close: a tab in the split (or give space_id)." },
+                    "action": { "type": "string", "enum": ["open", "resize", "close"], "description": "Default open." },
+                    "tab_id": { "type": "string", "description": "open: the left tab. resize/close: a tab in the split (or give space_id)." },
                     "other_tab_id": { "type": "string", "description": "open: the right tab, in the same space." },
-                    "space_id": { "type": "string", "description": "close: the space whose split to end. Default: the active space." }
+                    "ratio": { "type": "number", "minimum": 0.15, "maximum": 0.85, "description": "open/resize: the left tab's share of the width. Default 0.5." },
+                    "space_id": { "type": "string", "description": "resize/close: the space whose split it is. Default: the active space." }
                 }),
                 &[],
             )
@@ -722,8 +723,25 @@ pub fn run_model_tool(state: &mut State, name: &str, args: &Value) -> Option<Res
                     if left == right || space.tab(&right).is_none() || space.tab(&left).is_none() {
                         return Err("split view needs two different tabs in the same space".into());
                     }
-                    space.split = Some(Split { left, right });
-                    done(json!({ "split": true, "space_id": space_id }), vec![])
+                    let mut split = Split::new(left, right);
+                    if let Some(r) = args.get("ratio").and_then(Value::as_f64) {
+                        split.ratio = crate::model::clamp_split_ratio(r as f32);
+                    }
+                    let ratio = split.ratio;
+                    space.split = Some(split);
+                    done(json!({ "split": true, "space_id": space_id, "ratio": ratio }), vec![])
+                }
+                "resize" => {
+                    let space_id = match (str_arg(args, "tab_id"), str_arg(args, "space_id")) {
+                        (Some(t), _) => state.space_of(t).ok_or_else(|| format!("no tab {t}"))?.id.clone(),
+                        (None, Some(s)) => s.to_string(),
+                        (None, None) => state.active_space.clone(),
+                    };
+                    let ratio = args.get("ratio").and_then(Value::as_f64).ok_or("missing argument `ratio`")? as f32;
+                    let fx = apply(state, Command::SetSplitRatio { space_id: Some(space_id.clone()), ratio })
+                        .map_err(|_| "that space has no split view".to_string())?;
+                    let ratio = state.space(&space_id).and_then(|s| s.split.as_ref()).map(|s| s.ratio);
+                    done(json!({ "split": true, "ratio": ratio }), fx)
                 }
                 "close" => {
                     let space_id = match (str_arg(args, "tab_id"), str_arg(args, "space_id")) {
@@ -734,7 +752,7 @@ pub fn run_model_tool(state: &mut State, name: &str, args: &Value) -> Option<Res
                     let fx = apply(state, Command::Unsplit { space_id: Some(space_id) })?;
                     done(json!({ "split": false }), fx)
                 }
-                a => Err(format!("unknown action `{a}` (use open or close)")),
+                a => Err(format!("unknown action `{a}` (use open, resize or close)")),
             },
             "duplicate_tab" => {
                 let (space, tab) = (state.active_space.clone(), state.active_space().active_tab.clone());

@@ -86,6 +86,8 @@ pub enum Command {
     SplitView { tab_id: Id },
     /// End the split view of a space (default: the active space).
     Unsplit { space_id: Option<Id> },
+    /// Moves a split's divider: the left tab's share of the width (D-038).
+    SetSplitRatio { space_id: Option<Id>, ratio: f32 },
     /// Air Traffic Control: open links matching `pattern` in this space (D-021).
     AddRoute { pattern: String, space_id: Id },
     RemoveRoute { route_id: Id },
@@ -416,7 +418,7 @@ impl State {
                 let active = space.active_tab.clone().filter(|a| space.tab(a).is_some());
                 match active {
                     Some(left) if left != tab_id && space.tab(&tab_id).is_some() => {
-                        self.active_space_mut().split = Some(Split { left, right: tab_id });
+                        self.active_space_mut().split = Some(Split::new(left, tab_id));
                         Ok(vec![])
                     }
                     _ => Err(CommandError::BadSplit),
@@ -425,6 +427,13 @@ impl State {
             Command::Unsplit { space_id } => {
                 let space_id = space_id.unwrap_or_else(|| self.active_space.clone());
                 self.space_mut(&space_id).ok_or(CommandError::NoSpace(space_id))?.split = None;
+                Ok(vec![])
+            }
+            Command::SetSplitRatio { space_id, ratio } => {
+                let space_id = space_id.unwrap_or_else(|| self.active_space.clone());
+                let space = self.space_mut(&space_id).ok_or(CommandError::NoSpace(space_id))?;
+                let split = space.split.as_mut().ok_or(CommandError::BadSplit)?;
+                split.ratio = crate::model::clamp_split_ratio(ratio);
                 Ok(vec![])
             }
             Command::AddRoute { pattern, space_id } => {

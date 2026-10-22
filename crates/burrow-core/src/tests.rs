@@ -553,6 +553,12 @@ fn split_view_shows_both_tabs_while_either_is_active() {
     assert_eq!(s.visible_tabs(), vec![c.clone()]);
     assert_eq!(s.apply(Command::SplitView { tab_id: c.clone() }), Err(CommandError::BadSplit));
 
+    // The divider moves within limits.
+    s.apply(Command::SetSplitRatio { space_id: None, ratio: 0.7 }).unwrap();
+    assert_eq!(s.active_space().split.as_ref().unwrap().ratio, 0.7);
+    s.apply(Command::SetSplitRatio { space_id: None, ratio: 0.01 }).unwrap();
+    assert_eq!(s.active_space().split.as_ref().unwrap().ratio, crate::model::SPLIT_RATIO_MIN);
+
     // Closing one half shows the other and ends the split.
     s.apply(Command::SelectTab { tab_id: a.clone() }).unwrap();
     s.apply(Command::CloseTab { tab_id: b.clone() }).unwrap();

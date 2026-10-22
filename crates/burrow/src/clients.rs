@@ -559,6 +559,32 @@ fn sanitize(name: &str) -> String {
     if n.trim().is_empty() { "download".into() } else { n }
 }
 
+// ---- Split view divider (D-038) -----------------------------------------------------------------
+
+wrap_client! {
+    pub struct DividerClient {}
+    impl Client {
+        // It talks to Rust like the sidebar does.
+        fn display_handler(&self) -> Option<DisplayHandler> { Some(SidebarDisplay::new()) }
+        fn keyboard_handler(&self) -> Option<KeyboardHandler> { Some(Keys::new()) }
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> { Some(DividerLifeSpan::new()) }
+    }
+}
+
+wrap_life_span_handler! {
+    struct DividerLifeSpan {}
+    impl LifeSpanHandler {
+        fn do_close(&self, _browser: Option<&mut Browser>) -> ::std::os::raw::c_int {
+            (!browser::is_closing()) as _
+        }
+
+        fn on_before_close(&self, browser: Option<&mut Browser>) {
+            let Some(id) = id_of(browser) else { return };
+            browser::later(move |b| b.on_browser_closed(id));
+        }
+    }
+}
+
 // ---- Sidebar ----------------------------------------------------------------------------------
 
 wrap_client! {

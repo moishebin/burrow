@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Burrow split divider</title>
+  <!-- The strip between the two tabs of a split view (D-038). Drag to resize, double-click to
+       share the width equally. Rust paints the background to match the window. -->
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; user-select: none; cursor: col-resize; }
+    #grip {
+      position: absolute; left: 50%; top: 50%; width: 4px; height: 40px; margin: -20px 0 0 -2px;
+      border-radius: 2px; background: rgba(31, 29, 43, 0.28); opacity: 0; transition: opacity 0.12s;
+    }
+    body:hover #grip, body.drag #grip { opacity: 1; }
+  </style>
+</head>
+<body>
+  <div id="grip"></div>
+  <script>
+    "use strict";
+    const send = (msg) => console.log("__burrow__" + JSON.stringify(msg));
+    let start = null;
+    let frame = 0;
+    let lastX = 0;
+    document.body.addEventListener("pointerdown", (e) => {
+      if (e.button !== 0) return;
+      start = lastX = e.screenX;
+      document.body.setPointerCapture(e.pointerId);
+      document.body.classList.add("drag");
+      send({ act: "split_drag", dx: 0, phase: "start" });
+    });
+    // One message per frame, like the sidebar's own edge.
+    document.body.addEventListener("pointermove", (e) => {
+      if (start === null) return;
+      lastX = e.screenX;
+      if (frame) return;
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        if (start !== null) send({ act: "split_drag", dx: lastX - start, phase: "move" });
+      });
+    });
+    const end = (e) => {
+      if (start === null) return;
+      send({ act: "split_drag", dx: e.screenX - start, phase: "end" });
+      start = null;
+      document.body.classList.remove("drag");
+    };
+    document.body.addEventListener("pointerup", end);
+    document.body.addEventListener("pointercancel", end);
+    document.body.addEventListener("dblclick", () => send({ act: "split_reset" }));
+  </script>
+</body>
+</html>

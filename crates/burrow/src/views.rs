@@ -97,9 +97,37 @@ wrap_browser_view_delegate! {
     }
 }
 
+// The split view's divider: as wide as the gap between the cards (D-038).
 wrap_browser_view_delegate! {
-    pub struct TabViewDelegate {}
-    impl ViewDelegate {}
+    pub struct DividerViewDelegate {}
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            Size { width: consts::CARD_MARGIN, height: 100 }
+        }
+        fn minimum_size(&self, _view: Option<&mut View>) -> Size {
+            Size { width: consts::CARD_MARGIN, height: 10 }
+        }
+    }
+    impl BrowserViewDelegate {
+        fn browser_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::ALLOY
+        }
+    }
+}
+
+wrap_browser_view_delegate! {
+    // `fills`: tabs and Peeks take the size their layout gives them. Their natural width would
+    // skew a split view's shares, since a box layout shares out the difference from it (D-038).
+    // Extension popups keep their natural (auto-resized) size.
+    pub struct TabViewDelegate {
+        fills: bool,
+    }
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size {
+            // An empty size means "the default".
+            if self.fills { Size { width: 1, height: 1 } } else { Size::default() }
+        }
+    }
     impl BrowserViewDelegate {
         /// `window.open` popups and DevTools: popups become tabs, DevTools keeps its own window.
         fn on_popup_browser_view_created(

@@ -182,6 +182,27 @@ pub struct Space {
 pub struct Split {
     pub left: Id,
     pub right: Id,
+    /// The left tab's share of the width, set by dragging the divider (D-038).
+    #[serde(default = "half")]
+    pub ratio: f32,
+}
+
+pub const SPLIT_RATIO_MIN: f32 = 0.15;
+pub const SPLIT_RATIO_MAX: f32 = 0.85;
+
+fn half() -> f32 {
+    0.5
+}
+
+impl Split {
+    pub fn new(left: Id, right: Id) -> Self {
+        Self { left, right, ratio: 0.5 }
+    }
+}
+
+/// A split ratio both halves stay usable at.
+pub fn clamp_split_ratio(ratio: f32) -> f32 {
+    if ratio.is_finite() { ratio.clamp(SPLIT_RATIO_MIN, SPLIT_RATIO_MAX) } else { 0.5 }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

@@ -17,7 +17,7 @@ An open-source browser in the spirit of Arc, built with Rust and Chromium (via C
 - **One window, always.** Popups and "open in new window" become tabs or Peeks.
 - **Peek**: links that would open a new tab, and links in pinned tabs that leave their site, open in a card over the page. Esc closes it; "Open as Tab" keeps it.
 - **Air Traffic Control**: rules like "figma.com → Work" send links to the right space, including links from other apps when Burrow is your default browser.
-- **Split View**: two tabs side by side (right-click a tab → Open in Split View).
+- **Split View**: two tabs side by side (right-click a tab → Open in Split View). Drag the divider between them to resize.
 - **History** (Ctrl+H), searched as you type in the address box.
 - **Boosts**: your own CSS for a site. Zoom is remembered per site. Videos go fullscreen properly.
 - **Chrome extensions** from the Chrome Web Store (password managers, dark mode, ad blockers, …): open an extension's page in the store and click **Add to Burrow** in the sidebar, then restart Burrow when it asks. The puzzle button at the top of the sidebar opens their popups; **Manage Extensions…** turns them on or off, removes or updates them, or installs one from a folder or `.crx` file.
