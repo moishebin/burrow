@@ -23,5 +23,8 @@ const ICONS = (() => {
     winRestore: s('<rect x="5" y="9" width="10" height="10" rx="1.5"/><path d="M9 9V6.5A1.5 1.5 0 0 1 10.5 5h7A1.5 1.5 0 0 1 19 6.5v7a1.5 1.5 0 0 1-1.5 1.5H15"/>', 14),
     winClose: s('<path d="M7 7l10 10"/><path d="M17 7 7 17"/>', 14),
     home: s('<path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/>', 13),
+    muted: s('<path d="M11 5 6 9H2v6h4l5 4z"/><path d="m22 9-6 6"/><path d="m16 9 6 6"/>'),
+    split: s('<rect x="3" y="4" width="18" height="16" rx="3"/><path d="M12 4v16"/>'),
+    history: s('<path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l3 2"/>'),
   };
 })();

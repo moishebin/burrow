@@ -104,7 +104,7 @@ wrap_browser_view_delegate! {
         /// `window.open` popups and DevTools: popups become tabs, DevTools keeps its own window.
         fn on_popup_browser_view_created(
             &self,
-            _browser_view: Option<&mut BrowserView>,
+            browser_view: Option<&mut BrowserView>,
             popup_browser_view: Option<&mut BrowserView>,
             is_devtools: ::std::os::raw::c_int,
         ) -> ::std::os::raw::c_int {
@@ -113,13 +113,26 @@ wrap_browser_view_delegate! {
             }
             let Some(popup) = popup_browser_view else { return 0 };
             let popup = popup.clone();
+            let opener = browser_view.and_then(|v| v.browser()).map(|b| b.identifier());
             // Adopt synchronously: CEF needs the view in a window before this returns.
-            browser::with(|b| b.adopt_popup(popup)).map_or(0, |_| 1)
+            browser::with(|b| b.adopt_popup(opener, popup)).map_or(0, |_| 1)
         }
 
         /// A window holds at most one Chrome-style BrowserView, and Burrow shows many (D-010).
         fn browser_runtime_style(&self) -> RuntimeStyle {
             RuntimeStyle::ALLOY
+        }
+    }
+}
+
+// The buttons in a Peek's header (D-022).
+wrap_button_delegate! {
+    pub struct PeekButtonDelegate {}
+    impl ViewDelegate {}
+    impl ButtonDelegate {
+        fn on_button_pressed(&self, button: Option<&mut Button>) {
+            let Some(id) = button.map(|b| View::from(&*b).id()) else { return };
+            browser::later(move |b| b.peek_button(id));
         }
     }
 }

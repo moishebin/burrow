@@ -173,3 +173,85 @@ Releases are GitHub releases tagged `v<version>`, with the archives attached. Th
 **No macOS build.** It can't be made from WSL: it needs the macOS SDK, an `.app` bundle with CEF's framework and helper apps, code signing, and changes in `main.rs` (CEF on macOS loads its framework at runtime). It needs a Mac or a macOS CI runner, and someone to test it.
 
 **Verified.** The Linux archive was extracted and run on Xvfb (sidebar, a page, and agent tools). The Windows archive has the same runtime files as the working per-user install. The packaged Windows build wasn't launched, because the owner's own Burrow was running.
+
+## D-021 · Air Traffic Control: rules that send links to a space (2026-10-22)
+
+**Context.** The owner asked for Arc's Air Traffic Control.
+
+**Decision.** `State.routes` holds rules `{pattern, space_id}`, edited in **+ → Air Traffic Control…**, from a tab's menu ("Send This Site to a Space…") or by agents (`air_traffic_control` tool).
+- A pattern without `/` is a domain and also matches its subdomains (`figma.com` matches `www.figma.com` and `help.figma.com`, not `notfigma.com`). With `/` it matches addresses starting with it, on whole path segments (`github.com/my-org` doesn't match `github.com/my-organizer`). Scheme and `www.` are ignored. The longest matching pattern wins.
+- Rules apply to links that open a new tab or Peek (target=_blank, Ctrl+click, the page menu) and to links from other programs (D-024). A link to a site whose rule points at the space it is already in is not routed.
+- Rules do **not** apply to what the user types in the address box, or to links clicked inside a page that stay in the same tab: in both cases the user chose where they are.
+- A routed foreground link switches to the target space; a background one just appears there. A toast names the space.
+- Deleting a space deletes its rules.
+
+**Why.** Arc's own rules work the same way (domain or "URL contains"). Whole-segment matching avoids surprising matches.
+
+## D-022 · Peek: a page in a card over the current one (2026-10-22)
+
+**Context.** The owner asked that new links not open as new pages but as a popup over the page, like Arc's Peek.
+
+**Decision.**
+- Links that would open a new tab in the foreground (target=_blank), `window.open` popups, and "Open Link in Peek" in the page menu open in a **Peek**: a card over the content area with the page's title, **Open as Tab** and ✕, over a dimmed page. Esc or Ctrl+W closes it. Open as Tab moves the live browser into a new Today tab, without reloading.
+- In **pinned tabs and favorites**, a link click to another site opens in a Peek, so the pinned tab stays on its own site (Arc's behaviour). It only catches real link clicks (user gesture, link transition, main frame, not a redirect), never form submissions, and never sign-in pages (`links::looks_like_sign_in`: `login.`, `accounts.`, `/oauth`, `/saml`, …), so a sign-in's redirect back lands in the tab.
+- Explicit choices stay tabs: Ctrl/middle-click (background tab), Shift+click and "Open Link in New Tab".
+- Both behaviours can be turned off in **+ → Links and Peek…** (`settings.peek_new_tabs`, `settings.peek_from_pinned`, both on by default).
+- A Peek uses the profile of the tab it came from. It belongs to that page: switching tabs or spaces closes it. A popup from inside a Peek becomes a tab.
+- A Peek is a CEF **overlay** of the one window (`Window::add_overlay_view`), never a second window. Notes: CEF resets the colors of views placed in an overlay, so they are set again after attaching. An overlay can't take keyboard focus until it is clicked, and requesting focus into it before that loses the keyboard entirely; so the keyboard stays with the page behind (Esc and shortcuts work at once), and clicking the Peek moves typing into it.
+
+**Verified** on Linux/Xvfb with real clicks: target=_blank → Peek; Esc closes; Open as Tab moves the page into a tab without reloading; `window.open` → Peek, and `window.close()` from it closes the Peek; a pinned tab's link to another site → Peek while the tab stays put; closing the window with a Peek open exits cleanly. Not yet checked on Windows.
+
+## D-023 · History in its own file, searched from the address box (2026-10-22)
+
+**Decision.** Visits are kept in `<data>/history.json`, one entry per URL (title, last visit, count), newest first, at most 20,000, saved at most every 10 s. Only http(s) pages are recorded, including pages seen in a Peek. The address box shows matching open tabs first, then history (every typed word must match the title or URL; ranked by visit count, recency and host-prefix matches). **Ctrl+H** opens a searchable History list in the sidebar with per-entry delete and Clear History.
+
+**Why.** History changes on every page load; keeping it out of `state.json` keeps that file small and its saves cheap. JSON is enough at this size (a SQLite move stays open, as for D-005). The sidebar asks Rust for matches (`suggest`) instead of receiving the whole history on every render.
+
+## D-024 · Burrow as the default browser; links from other programs (2026-10-22)
+
+**Decision.**
+- `burrow.exe <url-or-file>` opens it. If Burrow is already running, the new process hands the link to it over the local API (`POST /v1/external`, same token as D-018) and exits, so a link never starts a second window or fails on the profile lock. Chromium's helper processes (`--type=…`) are ignored.
+- The link opens as a foreground Today tab in the space Air Traffic Control picks (else the active space), and the window is restored and brought to the front.
+- **+ → Make Burrow Your Default Browser…** (Windows only) writes the per-user registry entries Windows needs to list Burrow as a browser (`HKCU\Software\Clients\StartMenuInternet\Burrow`, `RegisteredApplications`, `BurrowURL`/`BurrowHTML` classes for http, https, .htm, .html, .pdf) with `reg.exe`, then opens Settings → Default apps, where the owner picks Burrow. Windows doesn't let programs make themselves the default.
+
+**Not verified on Windows yet** (the registry was not written to the owner's machine during development). Unit tests check the registry values and argument parsing; the handoff to a running Burrow was verified on Linux.
+
+## D-025 · Site icons cached on disk (2026-10-22)
+
+**Problem (reported by the owner with a screenshot).** Favorites showed a globe instead of their icon. Burrow only knew a tab's icon once its page had loaded in this run; otherwise it guessed `<site>/favicon.ico`, which many sites (Notion, Gmail, Asana, rust-lang.org, …) don't serve.
+
+**Decision.** Icons are saved as PNGs in `<data>/favicons/<host>.png` (up to 128 px), and the sidebar shows them by file URL.
+- When a page reports its icon, Burrow downloads it (`BrowserHost::download_image` on the sidebar's browser) and saves it, once per site per run.
+- For any tab whose site has no saved icon (e.g. favorites right after an Arc import), Burrow fetches the tab's home page in its space's profile (a `URLRequest`, so signed-in apps answer as usual; 4 at a time), reads its `<link rel=icon|apple-touch-icon>` tags (`burrow_core::favicon::candidates`, largest first), and saves the first one that downloads, falling back to `/favicon.ico`.
+- The sidebar tries, in order: the saved icon for the tab's current site, for its home site, the page's reported icon, `/favicon.ico`, then a globe.
+
+**Gotcha.** `Image::as_png` returns nothing unless it is given places to write the pixel size (cef-rs passes null for `None`, which CEF rejects).
+
+**Verified** on Linux/Xvfb: with the icon folder deleted and no tab loaded, all 11 test sites got their real icons within seconds, including the ones that showed globes before.
+
+## D-026 · Split View, fullscreen, zoom memory, Boosts and small tab actions (2026-10-22)
+
+- **Split View.** `Space.split = {left, right}`: while either tab is active, both show side by side (the content panel is now a horizontal box layout; hidden tabs are skipped by it). Clicking into a half makes it the active tab, so the address box and buttons follow. Closing a half shows the other; moving a half to another space, clearing or archiving it ends the split. Auto-archive keeps both halves of a shown split. Right-click a tab → Open in Split View / Close Split View.
+- **Fullscreen.** A page going fullscreen (videos) makes the window fullscreen and hides the sidebar, the card margins and the other half of a split. Escape leaves it: Chrome does that itself, CEF's Alloy style doesn't. F11 toggles Burrow's own fullscreen.
+- **Zoom** is remembered per site (`State.zoom`, by host) and reapplied when a page of that site loads. The address box shows a zoom chip (e.g. 120%) when it isn't 100%; clicking it resets.
+- **Boosts.** Right-click a tab → Boost This Site… adds the user's CSS to every page of that host (`State.boosts`), applied on each load and immediately to open pages.
+- **Tab menu:** Duplicate Tab, Mute/Unmute Tab (a muted tab shows an icon). **Shortcuts:** Ctrl+Shift+C copies the address, Ctrl+P prints, Ctrl+H history, F11 fullscreen.
+- Agents got an `air_traffic_control` tool (list/add/remove rules). Page tools on a split tab no longer emulate a viewport size, since that tab is shown.
+
+## D-027 · Fixes found while testing (2026-10-22)
+
+- **Pages that close themselves now close.** `do_close` returns 1 so closing one tab doesn't close the window (D-010 #5), but that means Burrow must remove the view itself. It never did for `window.close()`, so self-closing tabs and sign-in popups stayed open. `do_close` now asks the controller to close that tab or Peek.
+- **Pages without a background are white.** Tab browsers had a transparent default background, so such pages showed the sidebar's tint behind them. Tabs and Peeks now default to white, as in Chrome.
+- On Xvfb, the window's first frame can show without the content card until something changes. The build before these changes does the same, so it isn't a regression; it hasn't been seen on Windows.
+
+## D-028 · Agents can use every new feature (2026-10-22)
+
+**Context.** The owner asked that agents be able to do everything the new features do, Boosts above all.
+
+**Decision.** New agent tools (MCP, CLI and API, D-018):
+- In `burrow_core::agent` (model only, unit-tested): `split_view` (open/close), `duplicate_tab`, `link_settings` (the two Peek switches), plus `air_traffic_control` from D-026.
+- In the app (`tools.rs`, `app_tool`): `boost` (list/get/set/remove, by host or tab), `search_history`, `delete_history`, `peek` (status/open/close/expand), `set_zoom` (percent, remembered per site) and `mute_tab`.
+
+**Agents still don't disturb the user (D-018).** `split_view` never changes the active tab: the split appears only when the user is on one of its tabs. `duplicate_tab` stays in the background unless `focus` is set. `peek open` is the exception, since a Peek only exists over the tab the user is looking at; its description tells agents to use it only when asked. None of these are page tools (D-019): they don't read or act on a page's content, so they work when pages are blocked. Boosts do change how pages look; that is the owner's own choice of CSS, set on request.
+
+**Verified** on Linux/Xvfb through `burrow --agent`: a Boost set by an agent restyled an open page; history search and delete; zoom 125% saved for the site; mute; duplicate; split open/close; Peek open/status/close; the shown tab stayed the same throughout.

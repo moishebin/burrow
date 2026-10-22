@@ -21,6 +21,15 @@ pub fn state_file() -> PathBuf {
     data_dir().join("state.json")
 }
 
+pub fn history_file() -> PathBuf {
+    data_dir().join("history.json")
+}
+
+/// Saved site icons, one PNG per host (D-025).
+pub fn favicons_dir() -> PathBuf {
+    data_dir().join("favicons")
+}
+
 pub fn profile_dir(profile_id: &str) -> PathBuf {
     data_dir().join("profiles").join(profile_id)
 }

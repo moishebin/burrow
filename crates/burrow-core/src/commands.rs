@@ -80,6 +80,15 @@ pub enum Command {
     ReopenClosed,
     /// Reopen one entry of the archive (0 = newest), in the space it came from.
     ReopenArchived { index: usize },
+    /// Open a copy of a tab right below it in Today, and show it.
+    DuplicateTab { tab_id: Id },
+    /// Show `tab_id` next to the active tab (Split View). The active tab stays on the left.
+    SplitView { tab_id: Id },
+    /// End the split view of a space (default: the active space).
+    Unsplit { space_id: Option<Id> },
+    /// Air Traffic Control: open links matching `pattern` in this space (D-021).
+    AddRoute { pattern: String, space_id: Id },
+    RemoveRoute { route_id: Id },
 }
 
 /// Where to put a node.
@@ -127,6 +136,10 @@ pub enum CommandError {
     FolderIntoItself,
     #[error("cannot delete the last space")]
     LastSpace,
+    #[error("split view needs two different tabs in the same space")]
+    BadSplit,
+    #[error("enter a domain like github.com or an address like github.com/my-org")]
+    BadPattern,
 }
 
 pub type CommandResult = Result<Vec<Effect>, CommandError>;
@@ -140,6 +153,23 @@ fn now_ms() -> u64 {
 
 impl State {
     pub fn apply(&mut self, cmd: Command) -> CommandResult {
+        let result = self.run(cmd);
+        self.fix_splits();
+        result
+    }
+
+    /// A split view whose tabs are gone (closed, archived, moved away) ends.
+    pub(crate) fn fix_splits(&mut self) {
+        for s in &mut self.spaces {
+            if let Some(p) = &s.split
+                && (s.tab(&p.left).is_none() || s.tab(&p.right).is_none())
+            {
+                s.split = None;
+            }
+        }
+    }
+
+    fn run(&mut self, cmd: Command) -> CommandResult {
         match cmd {
             Command::NewTab { url } => {
                 let mut tab = Tab::new(url);
@@ -327,6 +357,7 @@ impl State {
                     .position(|s| s.id == space_id)
                     .ok_or_else(|| CommandError::NoSpace(space_id.clone()))?;
                 let space = self.spaces.remove(i);
+                self.routes.retain(|r| r.space_id != space_id);
                 if self.active_space == space_id {
                     self.active_space = self.spaces[i.saturating_sub(1)].id.clone();
                 }
@@ -366,6 +397,61 @@ impl State {
                     self.active_space = entry.space_id;
                 }
                 self.apply(Command::NewTab { url: entry.url })
+            }
+            Command::DuplicateTab { tab_id } => {
+                let space_id = self.space_of(&tab_id).ok_or_else(|| CommandError::NoTab(tab_id.clone()))?.id.clone();
+                let space = self.space_mut(&space_id).unwrap();
+                let source = space.tab(&tab_id).ok_or_else(|| CommandError::NoTab(tab_id.clone()))?;
+                let mut tab = Tab::new(source.url.clone());
+                tab.title = source.title.clone();
+                tab.favicon = source.favicon.clone();
+                tab.last_active_ms = now_ms();
+                let at = space.today.iter().position(|t| t.id == tab_id).map_or(0, |i| i + 1);
+                let id = tab.id.clone();
+                space.today.insert(at, tab);
+                self.apply(Command::SelectTab { tab_id: id })
+            }
+            Command::SplitView { tab_id } => {
+                let space = self.active_space();
+                let active = space.active_tab.clone().filter(|a| space.tab(a).is_some());
+                match active {
+                    Some(left) if left != tab_id && space.tab(&tab_id).is_some() => {
+                        self.active_space_mut().split = Some(Split { left, right: tab_id });
+                        Ok(vec![])
+                    }
+                    _ => Err(CommandError::BadSplit),
+                }
+            }
+            Command::Unsplit { space_id } => {
+                let space_id = space_id.unwrap_or_else(|| self.active_space.clone());
+                self.space_mut(&space_id).ok_or(CommandError::NoSpace(space_id))?.split = None;
+                Ok(vec![])
+            }
+            Command::AddRoute { pattern, space_id } => {
+                let pattern = crate::links::clean_pattern(&pattern);
+                let host = pattern.split('/').next().unwrap_or_default();
+                if host.is_empty() || host.contains(char::is_whitespace) {
+                    return Err(CommandError::BadPattern);
+                }
+                if self.space(&space_id).is_none() {
+                    return Err(CommandError::NoSpace(space_id));
+                }
+                self.routes.retain(|r| crate::links::clean_pattern(&r.pattern) != pattern);
+                self.routes.push(Route { id: new_id(), pattern, space_id });
+                Ok(vec![])
+            }
+            Command::RemoveRoute { route_id } => {
+                self.routes.retain(|r| r.id != route_id);
+                Ok(vec![])
+            }
+        }
+    }
+
+    /// Ends the split view that shows `tab_id`, if any.
+    fn drop_split(&mut self, tab_id: &str) {
+        for s in &mut self.spaces {
+            if s.split.as_ref().is_some_and(|p| p.left == tab_id || p.right == tab_id) {
+                s.split = None;
             }
         }
     }
@@ -409,10 +495,15 @@ impl State {
         let mut stale: Vec<(Tab, Id)> = vec![];
         for space in &mut self.spaces {
             let active = space.active_tab.clone();
-            let (old, keep): (Vec<Tab>, Vec<Tab>) = space
-                .today
-                .drain(..)
-                .partition(|t| t.last_active_ms < cutoff && active.as_deref() != Some(&t.id));
+            // Both halves of a split view are in use while either is shown.
+            let partner = space.split.as_ref().and_then(|p| match active.as_deref() {
+                Some(a) if a == p.left => Some(p.right.clone()),
+                Some(a) if a == p.right => Some(p.left.clone()),
+                _ => None,
+            });
+            let in_use = |id: &str| active.as_deref() == Some(id) || partner.as_deref() == Some(id);
+            let (old, keep): (Vec<Tab>, Vec<Tab>) =
+                space.today.drain(..).partition(|t| t.last_active_ms < cutoff && !in_use(&t.id));
             space.today = keep;
             stale.extend(old.into_iter().map(|t| (t, space.id.clone())));
         }
@@ -421,6 +512,7 @@ impl State {
             self.archive_tab(&t, &space_id, now_ms);
             effects.push(Effect::CloseBrowser { tab_id: t.id });
         }
+        self.fix_splits();
         effects
     }
 
@@ -439,6 +531,13 @@ impl State {
             .clone();
         let space = self.space_mut(&space_id).unwrap();
         let section = space.section_of(tab_id).unwrap();
+        // Closing one half of a split view shows the other half.
+        let partner = space.split.as_ref().and_then(|p| {
+            if p.left == tab_id { Some(p.right.clone()) } else if p.right == tab_id { Some(p.left.clone()) } else { None }
+        });
+        if partner.is_some() {
+            space.split = None;
+        }
         let effects = vec![Effect::CloseBrowser {
             tab_id: tab_id.into(),
         }];
@@ -460,6 +559,7 @@ impl State {
         let space = self.space_mut(&space_id).unwrap();
         if space.active_tab.as_deref() == Some(tab_id) {
             space.active_tab = match today_pos {
+                _ if partner.is_some() => partner,
                 Some(p) if !space.today.is_empty() => {
                     Some(space.today[p.min(space.today.len() - 1)].id.clone())
                 }
@@ -568,6 +668,17 @@ impl State {
 
         let mut effects = vec![];
         if from_space != to_space {
+            let mut moved = vec![];
+            if is_folder {
+                if let Some(Node::Folder(f)) = find_node(&self.space(&to_space).unwrap().pinned, node_id) {
+                    collect_tab_ids(&f.children, &mut moved);
+                }
+            } else {
+                moved.push(node_id.to_string());
+            }
+            for id in &moved {
+                self.drop_split(id);
+            }
             let profile_changed = self.space(&from_space).unwrap().profile_id
                 != self.space(&to_space).unwrap().profile_id;
             let moved = self.space(&to_space).unwrap();

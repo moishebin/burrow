@@ -2,6 +2,8 @@
 //!
 //! Nothing here knows about CEF. The app layer owns the actual browsers and keys them by `Tab::id`.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 pub type Id = String;
@@ -26,6 +28,25 @@ pub struct State {
     /// Remembered answers to site permission prompts.
     #[serde(default)]
     pub site_permissions: Vec<SitePermission>,
+    /// Air Traffic Control: links that match a rule open in the rule's space (D-021).
+    #[serde(default)]
+    pub routes: Vec<Route>,
+    /// Remembered page zoom per host (Chromium zoom levels; 0 = 100%).
+    #[serde(default)]
+    pub zoom: BTreeMap<String, f64>,
+    /// Boosts: the user's own CSS for a host, added to every page of it.
+    #[serde(default)]
+    pub boosts: BTreeMap<String, String>,
+}
+
+/// One Air Traffic Control rule (D-021).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Route {
+    pub id: Id,
+    /// A domain (`github.com`, also matches its subdomains) or, with a `/`, the start of an
+    /// address without its scheme (`github.com/my-org`).
+    pub pattern: String,
+    pub space_id: Id,
 }
 
 pub const ARCHIVE_LIMIT: usize = 300;
@@ -64,6 +85,13 @@ pub struct Settings {
     /// spaces is always allowed (D-019).
     #[serde(default = "yes")]
     pub agent_page_access: bool,
+    /// Links that would open a new tab open in a Peek over the page instead (D-022).
+    #[serde(default = "yes")]
+    pub peek_new_tabs: bool,
+    /// In pinned tabs and favorites, links to another site open in a Peek, so the tab stays on
+    /// its own site (Arc's behaviour, D-022).
+    #[serde(default = "yes")]
+    pub peek_from_pinned: bool,
 }
 
 fn yes() -> bool {
@@ -81,6 +109,8 @@ impl Default for Settings {
             archive_after_hours: default_archive_hours(),
             system_title_bar: false,
             agent_page_access: true,
+            peek_new_tabs: true,
+            peek_from_pinned: true,
         }
     }
 }
@@ -113,6 +143,15 @@ pub struct Space {
     pub today: Vec<Tab>,
     #[serde(default)]
     pub active_tab: Option<Id>,
+    /// Two tabs shown side by side while either of them is the active tab.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub split: Option<Split>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Split {
+    pub left: Id,
+    pub right: Id,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -211,6 +250,9 @@ impl Default for State {
             settings: Settings::default(),
             archive: Vec::new(),
             site_permissions: Vec::new(),
+            routes: Vec::new(),
+            zoom: BTreeMap::new(),
+            boosts: BTreeMap::new(),
             profiles: vec![profile],
             spaces: vec![space],
         }
@@ -229,6 +271,7 @@ impl Space {
             pinned: Vec::new(),
             today: Vec::new(),
             active_tab: None,
+            split: None,
         }
     }
 
@@ -356,6 +399,17 @@ impl State {
         space.active_tab.as_deref().and_then(|id| space.tab(id))
     }
 
+    /// The tabs the content area shows, left to right: the active tab, or both halves of its
+    /// split view.
+    pub fn visible_tabs(&self) -> Vec<Id> {
+        let space = self.active_space();
+        let Some(active) = self.active_tab().map(|t| t.id.clone()) else { return vec![] };
+        match &space.split {
+            Some(s) if s.left == active || s.right == active => vec![s.left.clone(), s.right.clone()],
+            _ => vec![active],
+        }
+    }
+
     /// The space that owns a tab or folder.
     pub fn space_of(&self, node_id: &str) -> Option<&Space> {
         self.spaces.iter().find(|s| s.section_of(node_id).is_some())
@@ -464,7 +518,13 @@ impl State {
                 && s.tab(a).is_none() {
                     s.active_tab = None;
                 }
+            if let Some(split) = &s.split
+                && (split.left == split.right || s.tab(&split.left).is_none() || s.tab(&split.right).is_none()) {
+                    s.split = None;
+                }
         }
+        let spaces: Vec<Id> = self.spaces.iter().map(|s| s.id.clone()).collect();
+        self.routes.retain(|r| spaces.contains(&r.space_id));
         if self.space(&self.active_space).is_none() {
             self.active_space = self.spaces[0].id.clone();
         }

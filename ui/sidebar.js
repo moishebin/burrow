@@ -42,6 +42,7 @@ const titleOf = (t) => t.custom_title || t.title || hostOf(t.url) || "New Tab";
 const isLive = (id) => !!(view.live && view.live[id]);
 const isLoading = (id) => !!(view.live && view.live[id] && view.live[id].loading);
 const drifted = (t) => t.home_url && t.home_url !== t.url;
+const inSplit = (id) => !!(view.visible && view.visible.length > 1 && view.visible.includes(id));
 function findTab(id) {
   for (const s of view.state.spaces) {
     const walk = (nodes) => {
@@ -63,25 +64,38 @@ const GLOBE_IMG =
   "data:image/svg+xml," +
   encodeURIComponent(ICONS.globe.replace('stroke="currentColor"', 'stroke="#6b6880"').replace('width="16" height="16"', 'width="24" height="24"'));
 
+/** The icon Burrow saved on disk for a URL's site (D-025), if any. */
+function savedIcon(url) {
+  if (!url || !/^https?:/.test(url) || !view.icons) return null;
+  const file = view.icons.files[hostOf(url).toLowerCase()];
+  return file ? view.icons.base + file : null;
+}
+
 function favicon(tab, size = 16) {
   if (isLoading(tab.id)) return el("span", "spinner");
-  // Tabs that never loaded in Burrow have no favicon yet: try the site's /favicon.ico.
-  let src = tab.favicon && /^(https?:|data:image\/)/.test(tab.favicon) ? tab.favicon : null;
-  if (!src && /^https?:/.test(tab.url)) {
-    try { src = new URL(tab.url).origin + "/favicon.ico"; } catch { /* not a URL */ }
+  // Best first: the saved icon of the site the tab is on, of its home site, the icon the page
+  // reported, the site's /favicon.ico; a globe if none loads.
+  const sources = [savedIcon(tab.url), savedIcon(tab.home_url)];
+  if (tab.favicon && /^(https?:|data:image\/)/.test(tab.favicon)) sources.push(tab.favicon);
+  if (/^https?:/.test(tab.url)) {
+    try { sources.push(new URL(tab.url).origin + "/favicon.ico"); } catch { /* not a URL */ }
   }
-  if (src) {
-    const img = el("img", "favicon");
-    img.width = img.height = size;
-    // Swap the source rather than the element: errors can fire before the img is attached.
-    img.onerror = () => {
+  const list = [...new Set(sources.filter(Boolean))];
+  if (!list.length) return icon("globe", "ico");
+  const img = el("img", "favicon");
+  img.width = img.height = size;
+  let i = 0;
+  // Swap the source rather than the element: errors can fire before the img is attached.
+  img.onerror = () => {
+    i += 1;
+    if (i < list.length) img.src = list[i];
+    else {
       img.onerror = null;
       img.src = GLOBE_IMG;
-    };
-    img.src = src;
-    return img;
-  }
-  return icon("globe", "ico");
+    }
+  };
+  img.src = list[0];
+  return img;
 }
 
 function copy(text) {
@@ -172,6 +186,9 @@ function renderToolbar() {
 function renderAddress() {
   const input = $("address-input");
   const tab = view.shown ? findTab(view.shown) : null;
+  const zoom = $("zoom");
+  zoom.hidden = !tab || !view.zoom || view.zoom === 100;
+  zoom.textContent = `${view.zoom}%`;
   $("address-lock").innerHTML = ICONS.lock;
   $("address-lock").classList.toggle("on", !!tab && tab.url.startsWith("https:") && addressMode === null);
   if (addressMode !== null) return; // the user is typing
@@ -187,7 +204,7 @@ function renderFavorites(sp) {
     const b = el("button", "fav");
     b.dataset.id = t.id;
     b.title = titleOf(t);
-    b.classList.toggle("active", t.id === view.shown);
+    b.classList.toggle("active", t.id === view.shown || inSplit(t.id));
     b.classList.toggle("live", isLive(t.id));
     b.append(favicon(t, 20));
     b.onclick = () => cmd("select_tab", { tab_id: t.id });
@@ -205,9 +222,21 @@ function tabRow(t, section, depth) {
   row.style.setProperty("--depth", depth);
   row.classList.toggle("active", t.id === view.shown);
   row.classList.toggle("unloaded", section !== "today" && !isLive(t.id));
+  row.classList.toggle("in-split", inSplit(t.id));
   const ico = el("span", "ico");
   ico.append(favicon(t));
   row.append(ico, el("span", "label", titleOf(t)));
+  if (view.live[t.id]?.muted) {
+    const m = icon("muted", "flag");
+    m.title = "Muted — click to unmute";
+    m.onclick = (e) => (e.stopPropagation(), act("set_muted", { tab_id: t.id, muted: false }));
+    row.append(m);
+  }
+  if (inSplit(t.id)) {
+    const sp = icon("split", "flag");
+    sp.title = "In Split View";
+    row.append(sp);
+  }
   row.title = `${titleOf(t)}\n${t.url}`;
 
   const actions = el("span", "actions");
@@ -304,7 +333,8 @@ function renderDownloadsButton() {
 // Address box
 
 const addressInput = $("address-input");
-let suggestions = []; // tabs matching what's typed
+let suggestions = []; // [{ tab, space } | { visit }] matching what's typed
+let historyHits = { q: "", list: [] }; // the last answer to act("suggest")
 let suggestIndex = -1; // highlighted suggestion, -1 = none (Enter navigates)
 
 function allTabs() {
@@ -320,6 +350,13 @@ function allTabs() {
 
 function updateSuggestions() {
   const q = addressInput.value.trim().toLowerCase();
+  if (addressMode !== null && addressMode !== "find" && q.length >= 2 && q !== historyHits.q) act("suggest", { query: q });
+  renderSuggestions();
+}
+
+/** Open tabs first (any space), then pages from history that aren't open. */
+function renderSuggestions() {
+  const q = addressInput.value.trim().toLowerCase();
   const box = $("suggest");
   suggestions = [];
   suggestIndex = -1;
@@ -327,25 +364,40 @@ function updateSuggestions() {
     box.hidden = true;
     return;
   }
+  const words = q.split(/\s+/);
   const active = view.state.active_space;
-  suggestions = allTabs()
-    .filter(([t]) => titleOf(t).toLowerCase().includes(q) || t.url.toLowerCase().includes(q))
+  const tabs = allTabs()
+    .filter(([t]) => words.every((w) => titleOf(t).toLowerCase().includes(w) || t.url.toLowerCase().includes(w)))
     .sort(([, a], [, b]) => (a.id === active ? 0 : 1) - (b.id === active ? 0 : 1))
-    .slice(0, 6);
+    .slice(0, 5);
+  const open = new Set(allTabs().map(([t]) => t.url));
+  const visits = historyHits.q === q ? historyHits.list.filter((v) => !open.has(v.url)).slice(0, 8 - tabs.length) : [];
+  suggestions = [...tabs.map(([tab, space]) => ({ tab, space })), ...visits.map((visit) => ({ visit }))];
   box.replaceChildren();
-  suggestions.forEach(([t, s], i) => {
+  let headed = false;
+  suggestions.forEach((sg, i) => {
+    if (sg.visit && !headed) {
+      headed = true;
+      box.append(el("div", "hint", "History"));
+    }
     const row = el("div", "row");
     const ico = el("span", "ico");
-    ico.append(favicon(t));
-    row.append(ico, el("span", "label", titleOf(t)));
-    if (s.id !== active) row.append(el("span", "space-tag", (s.icon ? s.icon + " " : "") + s.name));
+    if (sg.tab) {
+      ico.append(favicon(sg.tab));
+      row.append(ico, el("span", "label", titleOf(sg.tab)));
+      if (sg.space.id !== active) row.append(el("span", "space-tag", (sg.space.icon ? sg.space.icon + " " : "") + sg.space.name));
+    } else {
+      ico.append(favicon({ id: "", url: sg.visit.url }));
+      row.append(ico, el("span", "label", sg.visit.title || sg.visit.url), el("span", "space-tag", hostOf(sg.visit.url)));
+    }
+    row.title = sg.tab ? sg.tab.url : sg.visit.url;
     row.onmousedown = (e) => {
       e.preventDefault();
       pickSuggestion(i);
     };
     box.append(row);
   });
-  if (suggestions.length) box.append(el("div", "hint", "↑↓ to pick a tab · Enter to search"));
+  if (suggestions.length) box.append(el("div", "hint", "↑↓ to pick · Enter to search"));
   box.hidden = suggestions.length === 0;
 }
 
@@ -355,9 +407,11 @@ function highlightSuggestion(i) {
 }
 
 function pickSuggestion(i) {
-  const [t] = suggestions[i];
+  const sg = suggestions[i];
+  const newTab = addressMode === "new" || !view.shown;
   leaveAddress();
-  cmd("select_tab", { tab_id: t.id });
+  if (sg.tab) cmd("select_tab", { tab_id: sg.tab.id });
+  else act("navigate", { input: sg.visit.url, new_tab: newTab });
 }
 
 function leaveAddress() {
@@ -431,6 +485,20 @@ window.burrow = {
     view = v;
     if (v.toast) toast(v.toast);
     scheduleRender();
+    if (dialogRefresh && !backdrop.hidden) dialogRefresh();
+  },
+  /** History matches for the address box (answer to act("suggest")). */
+  suggestions(q, list) {
+    historyHits = { q, list };
+    if (addressInput.value.trim().toLowerCase() === q) renderSuggestions();
+  },
+  /** The History dialog's list (answer to act("history_list")). */
+  history(q, list) {
+    if (historyView) historyView(q, list);
+  },
+  openHistory() {
+    document.body.classList.remove("collapsed");
+    historyDialog();
   },
   focusInput(newTab) {
     document.body.classList.remove("collapsed"); // hidden elements can't take focus
@@ -733,6 +801,9 @@ function moveToSpaceItems(id, section) {
 
 function tabMenu(e, t, section) {
   const move = (to) => cmd("move_node", { node_id: t.id, to: { space_id: null, parent: null, index: null, ...to } });
+  const live = view.live[t.id];
+  const web = /^https?:/.test(t.url);
+  const canSplit = view.shown && view.shown !== t.id && !inSplit(t.id) && space().id === view.state.active_space;
   showMenu(e, [
     section === "today" && { label: "Pin Tab", action: () => move({ section: "pinned" }) },
     section === "pinned" && { label: "Unpin Tab", action: () => move({ section: "today", index: 0 }) },
@@ -740,6 +811,13 @@ function tabMenu(e, t, section) {
     section === "favorites" && { label: "Remove from Favorites", action: () => move({ section: "today", index: 0 }) },
     drifted(t) && { label: "Back to Pinned Page", action: () => cmd("reset_tab", { tab_id: t.id }) },
     moveToSpaceItems(t.id, section),
+    { sep: true },
+    canSplit && { label: "Open in Split View", action: () => cmd("split_view", { tab_id: t.id }) },
+    inSplit(t.id) && { label: "Close Split View", action: () => cmd("unsplit", { space_id: null }) },
+    { label: "Duplicate Tab", action: () => cmd("duplicate_tab", { tab_id: t.id }) },
+    live && { label: live.muted ? "Unmute Tab" : "Mute Tab", action: () => act("set_muted", { tab_id: t.id, muted: !live.muted }) },
+    web && { label: "Send This Site to a Space…", action: () => atcDialog(hostOf(t.url)) },
+    web && { label: "Boost This Site…", action: () => boostDialog(hostOf(t.url)) },
     { sep: true },
     section !== "favorites" && { label: "Rename…", action: () => startRename(document.querySelector(`.row[data-id="${t.id}"]`), t) },
     t.custom_title && { label: "Reset Name", action: () => cmd("rename_tab", { tab_id: t.id, title: null }) },
@@ -833,6 +911,9 @@ function addMenu(e) {
     view.arc_available && { label: "Import from Arc…", action: importArcDialog },
     { sep: true },
     recentlyClosedItems(),
+    { label: "History…  (Ctrl+H)", action: historyDialog },
+    { label: "Air Traffic Control…", action: () => atcDialog("") },
+    { label: "Links and Peek…", action: peekDialog },
     { label: "Search Engine…", action: searchDialog },
     { label: "Auto-Archive…", action: archiveDialog },
     { label: "Keyboard Shortcuts", action: shortcutsDialog },
@@ -844,6 +925,7 @@ function addMenu(e) {
       label: view.state.settings.system_title_bar ? "Use Arc-Style Window" : "Use Windows Title Bar",
       action: () => act("set_system_title_bar", { on: !view.state.settings.system_title_bar }),
     },
+    view.windows && { label: "Make Burrow Your Default Browser…", action: () => act("make_default_browser") },
     { label: "Sidebar DevTools", action: () => act("dev_tools", { sidebar: true }) },
   ]);
 }
@@ -854,8 +936,13 @@ function addMenu(e) {
 const backdrop = $("dialog-backdrop");
 const dialog = $("dialog");
 
+let dialogRefresh = null; // rebuilds the open dialog's live parts when the state changes
+let historyView = null; // fills the History dialog's list
+
 function openDialog(build) {
   hideMenu();
+  dialogRefresh = null;
+  historyView = null;
   dialog.replaceChildren();
   build(dialog);
   backdrop.hidden = false;
@@ -865,6 +952,9 @@ function openDialog(build) {
 function closeDialog() {
   if (backdrop.hidden) return;
   backdrop.hidden = true;
+  dialog.classList.remove("wide");
+  dialogRefresh = null;
+  historyView = null;
   busy--;
   if (pendingRender) render();
 }
@@ -1011,7 +1101,9 @@ function shortcutsDialog() {
     ["Ctrl+T", "New tab"], ["Ctrl+L", "Edit address"], ["Ctrl+W", "Close tab (pinned: unload)"],
     ["Ctrl+D", "Pin / unpin tab"], ["Ctrl+1…9", "Switch space"], ["Ctrl+Tab", "Next tab"],
     ["Ctrl+S", "Hide / show sidebar"], ["Alt+← / →", "Back / forward"], ["Ctrl+R, F5", "Reload"],
-    ["Ctrl+= / − / 0", "Zoom"], ["Ctrl+F", "Find in page"], ["Ctrl+Shift+T", "Reopen closed tab"], ["F12", "DevTools"],
+    ["Ctrl+= / − / 0", "Zoom (remembered per site)"], ["Ctrl+F", "Find in page"], ["Ctrl+Shift+T", "Reopen closed tab"],
+    ["Ctrl+H", "History"], ["Ctrl+Shift+C", "Copy page address"], ["Ctrl+P", "Print"], ["F11", "Full screen"],
+    ["Esc", "Close a Peek"], ["F12", "DevTools"],
   ];
   openDialog((d) => {
     d.append(el("h2", null, "Keyboard Shortcuts"));
@@ -1051,6 +1143,160 @@ function downloadsDialog() {
     const ok = el("button", "btn primary", "Close");
     ok.onclick = closeDialog;
     row.append(ok);
+    d.append(row);
+  });
+}
+
+// Air Traffic Control (D-021): rules that send a site's links to a space.
+function atcDialog(prefill) {
+  openDialog((d) => {
+    d.append(el("h2", null, "Air Traffic Control"));
+    d.append(el("p", null, "Links to these sites open in the space you choose: from other apps, and from tabs in other spaces. A rule with a / (like github.com/my-org) matches only those pages."));
+    const list = el("div", "rules");
+    d.append(list);
+    const fill = () => {
+      list.replaceChildren();
+      if (!view.state.routes.length) list.append(el("p", null, "No rules yet."));
+      for (const r of view.state.routes) {
+        const sp = view.state.spaces.find((x) => x.id === r.space_id);
+        const row = el("div", "rule");
+        row.append(el("span", "pattern", r.pattern), el("span", "to", "→ " + (sp ? (sp.icon ? sp.icon + " " : "") + sp.name : "?")));
+        const x = icon("close", "act");
+        x.title = "Remove rule";
+        x.onclick = () => cmd("remove_route", { route_id: r.id });
+        row.append(x);
+        list.append(row);
+      }
+    };
+    fill();
+    dialogRefresh = fill;
+    const pattern = el("input");
+    pattern.placeholder = "Site, like figma.com";
+    pattern.value = prefill || "";
+    const to = el("select");
+    for (const sp of view.state.spaces) {
+      const o = el("option", null, (sp.icon ? sp.icon + "  " : "") + sp.name);
+      o.value = sp.id;
+      o.selected = sp.id === view.state.active_space;
+      to.append(o);
+    }
+    const add = el("button", "btn", "Add Rule");
+    add.onclick = () => {
+      if (!pattern.value.trim()) return pattern.focus();
+      cmd("add_route", { pattern: pattern.value, space_id: to.value });
+      pattern.value = "";
+      pattern.focus();
+    };
+    const form = el("div", "rule-form");
+    form.append(pattern, to, add);
+    d.append(form);
+    const row = el("div", "buttons");
+    const ok = el("button", "btn primary", "Done");
+    ok.onclick = closeDialog;
+    row.append(ok);
+    d.append(row);
+    d.onkeydown = (e) => e.key === "Enter" && e.target === pattern && add.click();
+  });
+}
+
+function peekDialog() {
+  openDialog((d) => {
+    d.append(el("h2", null, "Links and Peek"));
+    d.append(el("p", null, "A Peek shows a page in a card over the one you're on. Press Esc to close it, or Open as Tab to keep it."));
+    const check = (text, on) => {
+      const l = el("label", "check");
+      const c = el("input");
+      c.type = "checkbox";
+      c.checked = on;
+      l.append(c, document.createTextNode(text));
+      d.append(l);
+      return c;
+    };
+    const newTabs = check("Open links that would open a new tab in a Peek", view.state.settings.peek_new_tabs);
+    const pinned = check("In pinned tabs and favorites, open links to other sites in a Peek", view.state.settings.peek_from_pinned);
+    d.append(el("p", null, "Ctrl+click and middle-click still open background tabs. Right-click a link for more choices."));
+    buttons(d, "Save", () => act("set_peek", { new_tabs: newTabs.checked, from_pinned: pinned.checked }));
+  });
+}
+
+function boostDialog(host) {
+  openDialog((d) => {
+    d.append(el("h2", null, "Boost " + host));
+    d.append(el("p", null, "Your own CSS for every page of this site, e.g. body { font-size: 18px } or .ads { display: none }"));
+    const css = el("textarea");
+    css.spellcheck = false;
+    css.value = view.state.boosts[host] || "";
+    css.placeholder = "body { … }";
+    d.append(css);
+    if (view.state.boosts[host]) {
+      const remove = el("button", "btn", "Remove Boost");
+      remove.onclick = () => (act("set_boost", { host, css: "" }), closeDialog());
+      d.append(remove);
+    }
+    buttons(d, "Save", () => act("set_boost", { host, css: css.value }));
+    d.onkeydown = null; // Enter makes new lines here
+  });
+}
+
+function timeAgo(ms) {
+  const m = Math.round((Date.now() - ms) / 60000);
+  if (m < 1) return "now";
+  if (m < 60) return `${m} min`;
+  const h = Math.round(m / 60);
+  if (h < 24) return `${h} h`;
+  const days = Math.round(h / 24);
+  return days < 30 ? `${days} d` : new Date(ms).toLocaleDateString();
+}
+
+function historyDialog() {
+  openDialog((d) => {
+    d.classList.add("wide");
+    d.append(el("h2", null, "History"));
+    const q = el("input");
+    q.placeholder = "Search history";
+    const list = el("div", "history");
+    d.append(q, list);
+    historyView = (query, visits) => {
+      if (query !== q.value.trim()) return;
+      list.replaceChildren();
+      if (!visits.length) list.append(el("p", null, query ? "Nothing found." : "No history yet."));
+      for (const v of visits) {
+        const row = el("div", "row");
+        const ico = el("span", "ico");
+        ico.append(favicon({ id: "", url: v.url }));
+        const text = el("span", "label");
+        text.append(el("span", "t", v.title || v.url), el("span", "u", `${hostOf(v.url)} · ${timeAgo(v.last_ms)}`));
+        const x = icon("close", "act");
+        x.title = "Remove from history";
+        x.onclick = (e) => {
+          e.stopPropagation();
+          act("delete_history", { url: v.url });
+          row.remove();
+        };
+        row.title = v.url;
+        row.append(ico, text, x);
+        row.onclick = () => (closeDialog(), act("open_url", { url: v.url }));
+        list.append(row);
+      }
+    };
+    let timer = null;
+    q.oninput = () => (clearTimeout(timer), (timer = setTimeout(() => act("history_list", { query: q.value.trim() }), 120)));
+    act("history_list", { query: "" });
+    const row = el("div", "buttons");
+    const clear = el("button", "btn", "Clear History…");
+    clear.onclick = () => {
+      if (clear.dataset.sure) {
+        act("clear_history");
+        closeDialog();
+      } else {
+        clear.dataset.sure = "1";
+        clear.textContent = "Click again to clear all";
+        clear.style.color = "#c4314b";
+      }
+    };
+    const ok = el("button", "btn primary", "Done");
+    ok.onclick = closeDialog;
+    row.append(clear, ok);
     d.append(row);
   });
 }
@@ -1103,6 +1349,7 @@ $("pinned").oncontextmenu = (e) => e.target === $("pinned") && spaceMenu(e, spac
 $("btn-add").innerHTML = ICONS.plus;
 $("btn-add").onclick = addMenu;
 $("btn-downloads").onclick = downloadsDialog;
+$("zoom").onclick = (e) => (e.preventDefault(), act("reset_zoom"));
 $("new-tab").querySelector(".ico").innerHTML = ICONS.plus;
 document.addEventListener("contextmenu", (e) => e.preventDefault());
 

@@ -4,7 +4,7 @@
 
 use std::time::{Duration, Instant};
 
-use burrow_core::{agent, omnibox, Command, Id};
+use burrow_core::{agent, links, omnibox, Command, Id};
 use cef::*;
 use serde_json::{json, Value};
 
@@ -70,6 +70,9 @@ impl Burrow {
         let done: Done = Box::new(move |_, r| reply.send(r));
         if tool == "open_tab" {
             return self.agent_open_tab(&args, done);
+        }
+        if let Some(result) = self.app_tool(tool, &args) {
+            return done(self, result);
         }
         let tab = match need(&args, "tab_id") {
             Ok(t) if self.state.tab(t).is_some() => t.to_string(),
@@ -140,6 +143,99 @@ impl Burrow {
             }
             _ => done(self, Err(format!("unknown tool {tool}"))),
         }
+    }
+
+    /// Tools that need the app but no page: Boosts, history, the Peek, zoom and sound. `None`
+    /// means `tool` isn't one of them.
+    fn app_tool(&mut self, tool: &str, args: &Value) -> Option<Result<Value, String>> {
+        let tab = || -> Result<String, String> {
+            let t = need(args, "tab_id")?;
+            if self.state.tab(t).is_none() {
+                return Err(format!("no tab {t}"));
+            }
+            Ok(t.to_string())
+        };
+        Some(match tool {
+            "boost" => (|| {
+                let host = match (str_arg(args, "tab_id"), str_arg(args, "host")) {
+                    (Some(t), _) => {
+                        let url = self.state.tab(t).map(|t| t.url.clone()).ok_or_else(|| format!("no tab {t}"))?;
+                        Some(links::host_of(&url)).filter(|h| !h.is_empty()).ok_or("that tab isn't on a website")?
+                    }
+                    (None, Some(h)) => links::host_of(&format!("https://{}", h.trim_start_matches("https://").trim_start_matches("http://"))),
+                    (None, None) => String::new(),
+                };
+                match str_arg(args, "action").unwrap_or("list") {
+                    "list" => Ok(json!({ "boosts": self.state.boosts })),
+                    _ if host.is_empty() => Err("give host or tab_id".into()),
+                    "get" => Ok(json!({ "host": host, "css": self.state.boosts.get(&host) })),
+                    "set" => {
+                        let css = need(args, "css")?.to_string();
+                        let host = self.set_boost(&host, &css).ok_or("not a site")?;
+                        Ok(json!({ "host": host, "set": true }))
+                    }
+                    "remove" => {
+                        self.set_boost(&host, "");
+                        Ok(json!({ "host": host, "removed": true }))
+                    }
+                    a => Err(format!("unknown action `{a}` (use list, get, set or remove)")),
+                }
+            })(),
+            "search_history" => {
+                let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(50).clamp(1, 500) as usize;
+                let hits = self.history.search(str_arg(args, "query").unwrap_or(""), limit, super::now_ms());
+                Ok(json!({ "pages": hits }))
+            }
+            "delete_history" => {
+                if flag(args, "all", false) {
+                    self.history = Default::default();
+                } else {
+                    match need(args, "url") {
+                        Ok(u) => self.history.remove(u),
+                        Err(_) => return Some(Err("give url, or all=true".into())),
+                    }
+                }
+                self.schedule_history_save();
+                Ok(json!({ "deleted": true }))
+            }
+            "peek" => match str_arg(args, "action").unwrap_or("status") {
+                "status" => Ok(json!({ "open": self.peek.is_some(), "url": self.peek.as_ref().map(|p| &p.url) })),
+                "open" => match (self.shown.clone(), need(args, "url")) {
+                    (None, _) => Err("a Peek opens over the shown tab, and no tab is shown".into()),
+                    (_, Err(e)) => Err(e),
+                    (Some(shown), Ok(u)) => {
+                        let url = omnibox::resolve(u, &self.state.settings.search_url);
+                        self.open_peek(url.clone(), Some(shown));
+                        Ok(json!({ "open": self.peek.is_some(), "url": url }))
+                    }
+                },
+                "close" => {
+                    self.close_peek();
+                    Ok(json!({ "open": false }))
+                }
+                "expand" if self.peek.is_none() => Err("no Peek is open".into()),
+                "expand" => {
+                    self.expand_peek();
+                    Ok(json!({ "tab_id": self.shown }))
+                }
+                a => Err(format!("unknown action `{a}` (use status, open, close or expand)")),
+            },
+            "set_zoom" => tab().and_then(|t| {
+                let percent = args.get("percent").and_then(Value::as_f64).ok_or("missing argument `percent`")?;
+                if !self.set_zoom_percent(&t, percent) {
+                    return Err("the tab isn't loaded; focus it or navigate it first".into());
+                }
+                Ok(json!({ "zoom": percent.clamp(25.0, 500.0) }))
+            }),
+            "mute_tab" => tab().and_then(|t| {
+                let muted = args.get("muted").and_then(Value::as_bool).ok_or("missing argument `muted`")?;
+                if !self.set_muted(&t, muted) {
+                    return Err("the tab isn't loaded, so it has no sound".into());
+                }
+                Ok(json!({ "muted": muted }))
+            }),
+            _ => return None,
+        })
     }
 
     /// Shows "agent working" in the sidebar for a few seconds after each call.
@@ -275,7 +371,7 @@ impl Burrow {
     /// through DevTools makes it lay out and render (screenshots, coordinates) as if shown, while
     /// the user keeps seeing their own tab.
     fn emulate_viewport(&mut self, tab: Id, then: Step) {
-        if self.shown.as_ref() == Some(&tab) || !self.tabs.contains_key(&tab) {
+        if self.visible.contains(&tab) || !self.tabs.contains_key(&tab) {
             return then(self);
         }
         let size = View::from(&self.content).bounds();

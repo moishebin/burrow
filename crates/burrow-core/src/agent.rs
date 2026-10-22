@@ -192,6 +192,110 @@ pub const TOOLS: &[Tool] = &[
         schema: || object(json!({ "space_id": { "type": "string" } }), &["space_id"]),
     },
     Tool {
+        name: "air_traffic_control",
+        description: "List, add or remove Air Traffic Control rules: links to a site (from other apps, or from tabs in other spaces) open in the rule's space. A pattern without / is a domain and matches its subdomains; with / it matches addresses that start with it.",
+        schema: || {
+            object(
+                json!({
+                    "action": { "type": "string", "enum": ["list", "add", "remove"], "description": "Default list." },
+                    "pattern": { "type": "string", "description": "For add: e.g. figma.com or github.com/my-org." },
+                    "space_id": { "type": "string", "description": "For add: the space links should open in." },
+                    "route_id": { "type": "string", "description": "For remove." }
+                }),
+                &[],
+            )
+        },
+    },
+    Tool {
+        name: "split_view",
+        description: "Show two tabs of one space side by side (Split View), or end a split. A split shows whenever one of its tabs is the active tab; this never changes which tab the user is looking at.",
+        schema: || {
+            object(
+                json!({
+                    "action": { "type": "string", "enum": ["open", "close"], "description": "Default open." },
+                    "tab_id": { "type": "string", "description": "open: the left tab. close: a tab in the split (or give space_id)." },
+                    "other_tab_id": { "type": "string", "description": "open: the right tab, in the same space." },
+                    "space_id": { "type": "string", "description": "close: the space whose split to end. Default: the active space." }
+                }),
+                &[],
+            )
+        },
+    },
+    Tool {
+        name: "duplicate_tab",
+        description: "Open a copy of a tab right below it in Today. Stays in the background unless focus is true. Returns the new tab's id.",
+        schema: || object(json!({ "tab_id": tab_id(), "focus": { "type": "boolean", "description": "Default false." } }), &["tab_id"]),
+    },
+    Tool {
+        name: "link_settings",
+        description: "Read or change how links open. peek_new_tabs: links that would open a new tab open in a Peek (a card over the page). peek_from_pinned: in pinned tabs and favorites, links to other sites open in a Peek. Omit both to just read them.",
+        schema: || {
+            object(
+                json!({
+                    "peek_new_tabs": { "type": "boolean" },
+                    "peek_from_pinned": { "type": "boolean" }
+                }),
+                &[],
+            )
+        },
+    },
+    Tool {
+        name: "boost",
+        description: "Boosts: the user's own CSS for a site, added to every page of it (open pages update at once). action list = all boosts; get = one site's CSS; set = replace it; remove = delete it. Give the site as host (e.g. github.com) or as a tab_id.",
+        schema: || {
+            object(
+                json!({
+                    "action": { "type": "string", "enum": ["list", "get", "set", "remove"], "description": "Default list." },
+                    "host": { "type": "string", "description": "A site, e.g. news.ycombinator.com (www. is ignored)." },
+                    "tab_id": { "type": "string", "description": "Use this tab's site instead of host." },
+                    "css": { "type": "string", "description": "For set: the CSS, e.g. body { font-size: 18px }" }
+                }),
+                &[],
+            )
+        },
+    },
+    Tool {
+        name: "search_history",
+        description: "Search the browsing history (every word must match the title or URL; best matches first). An empty query lists the most recent pages.",
+        schema: || {
+            object(
+                json!({
+                    "query": { "type": "string" },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 500, "description": "Default 50." }
+                }),
+                &[],
+            )
+        },
+    },
+    Tool {
+        name: "delete_history",
+        description: "Remove one page (url) from the history, or everything (all=true).",
+        schema: || object(json!({ "url": { "type": "string" }, "all": { "type": "boolean" } }), &[]),
+    },
+    Tool {
+        name: "peek",
+        description: "The Peek: a page in a card over the tab the user is looking at. open shows url there (it needs a shown tab and appears in front of the user, so use it only when asked); close closes it; expand turns it into a tab; status tells whether one is open.",
+        schema: || {
+            object(
+                json!({
+                    "action": { "type": "string", "enum": ["status", "open", "close", "expand"], "description": "Default status." },
+                    "url": { "type": "string", "description": "For open: a URL or search words." }
+                }),
+                &[],
+            )
+        },
+    },
+    Tool {
+        name: "set_zoom",
+        description: "Zoom a tab's page (100 = normal). Burrow remembers it for the whole site.",
+        schema: || object(json!({ "tab_id": tab_id(), "percent": { "type": "number", "minimum": 25, "maximum": 500 } }), &["tab_id", "percent"]),
+    },
+    Tool {
+        name: "mute_tab",
+        description: "Mute or unmute a tab's sound. The tab must be loaded.",
+        schema: || object(json!({ "tab_id": tab_id(), "muted": { "type": "boolean" } }), &["tab_id", "muted"]),
+    },
+    Tool {
         name: "read_page",
         description: "Read a tab's page, loading it first if needed: its visible text, its HTML, or a numbered list of links, buttons and form fields (with CSS selectors to use with click/type_text). Works on any tab, not just the shown one.",
         schema: || {
@@ -542,12 +646,83 @@ pub fn run_model_tool(state: &mut State, name: &str, args: &Value) -> Option<Res
             }
             "delete_space" => done(json!({ "deleted": true }), apply(state, Command::DeleteSpace { space_id: need(args, "space_id")?.into() })?),
             "switch_space" => done(json!({ "shown": true }), apply(state, Command::SwitchSpace { space_id: need(args, "space_id")?.into() })?),
+            "split_view" => match str_arg(args, "action").unwrap_or("open") {
+                "open" => {
+                    let left = need(args, "tab_id")?.to_string();
+                    let right = need(args, "other_tab_id")?.to_string();
+                    let space_id = state.space_of(&left).ok_or_else(|| format!("no tab {left}"))?.id.clone();
+                    let space = state.space_mut(&space_id).unwrap();
+                    if left == right || space.tab(&right).is_none() || space.tab(&left).is_none() {
+                        return Err("split view needs two different tabs in the same space".into());
+                    }
+                    space.split = Some(Split { left, right });
+                    done(json!({ "split": true, "space_id": space_id }), vec![])
+                }
+                "close" => {
+                    let space_id = match (str_arg(args, "tab_id"), str_arg(args, "space_id")) {
+                        (Some(t), _) => state.space_of(t).ok_or_else(|| format!("no tab {t}"))?.id.clone(),
+                        (None, Some(s)) => s.to_string(),
+                        (None, None) => state.active_space.clone(),
+                    };
+                    let fx = apply(state, Command::Unsplit { space_id: Some(space_id) })?;
+                    done(json!({ "split": false }), fx)
+                }
+                a => Err(format!("unknown action `{a}` (use open or close)")),
+            },
+            "duplicate_tab" => {
+                let (space, tab) = (state.active_space.clone(), state.active_space().active_tab.clone());
+                let from_space = state.space_of(need(args, "tab_id")?).map(|s| (s.id.clone(), s.active_tab.clone()));
+                let fx = apply(state, Command::DuplicateTab { tab_id: need(args, "tab_id")?.into() })?;
+                let id = state.active_tab().map(|t| t.id.clone());
+                if bool_arg(args, "focus") != Some(true) {
+                    // Put back what the user was looking at, in both spaces.
+                    if let Some((sid, active)) = from_space
+                        && let Some(s) = state.space_mut(&sid) {
+                            s.active_tab = active;
+                        }
+                    state.active_space = space;
+                    state.active_space_mut().active_tab = tab;
+                }
+                done(json!({ "tab_id": id }), fx)
+            }
+            "link_settings" => {
+                if let Some(v) = bool_arg(args, "peek_new_tabs") {
+                    state.settings.peek_new_tabs = v;
+                }
+                if let Some(v) = bool_arg(args, "peek_from_pinned") {
+                    state.settings.peek_from_pinned = v;
+                }
+                done(
+                    json!({ "peek_new_tabs": state.settings.peek_new_tabs, "peek_from_pinned": state.settings.peek_from_pinned }),
+                    vec![],
+                )
+            }
+            "air_traffic_control" => {
+                match str_arg(args, "action").unwrap_or("list") {
+                    "list" => {}
+                    "add" => {
+                        let cmd = Command::AddRoute { pattern: need(args, "pattern")?.into(), space_id: need(args, "space_id")?.into() };
+                        apply(state, cmd)?;
+                    }
+                    "remove" => {
+                        apply(state, Command::RemoveRoute { route_id: need(args, "route_id")?.into() })?;
+                    }
+                    a => return Err(format!("unknown action `{a}` (use list, add or remove)")),
+                }
+                let rules: Vec<Value> = state
+                    .routes
+                    .iter()
+                    .map(|r| json!({ "route_id": r.id, "pattern": r.pattern, "space_id": r.space_id, "space": state.space(&r.space_id).map(|s| &s.name) }))
+                    .collect();
+                done(json!({ "rules": rules }), vec![])
+            }
             _ => unreachable!(),
         }
     };
     const MODEL_TOOLS: &[&str] = &[
         "list_spaces", "get_space", "list_tabs", "close_tab", "focus_tab", "move_tab", "rename_tab", "create_folder",
-        "update_folder", "create_space", "update_space", "delete_space", "switch_space",
+        "update_folder", "create_space", "update_space", "delete_space", "switch_space", "air_traffic_control",
+        "split_view", "duplicate_tab", "link_settings",
     ];
     MODEL_TOOLS.contains(&name).then(run)
 }

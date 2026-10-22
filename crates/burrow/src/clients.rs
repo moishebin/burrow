@@ -3,6 +3,8 @@
 
 use cef::*;
 
+use burrow_core::links::LinkKind;
+
 use crate::{
     browser::{self, Shortcut},
     consts,
@@ -28,9 +30,11 @@ const ALT: u32 = 1 << 3;
 
 // Windows virtual-key codes.
 const VK_TAB: i32 = 0x09;
+const VK_ESCAPE: i32 = 0x1B;
 const VK_LEFT: i32 = 0x25;
 const VK_RIGHT: i32 = 0x27;
 const VK_F5: i32 = 0x74;
+const VK_F11: i32 = 0x7A;
 const VK_F12: i32 = 0x7B;
 const VK_OEM_PLUS: i32 = 0xBB;
 const VK_OEM_MINUS: i32 = 0xBD;
@@ -74,6 +78,11 @@ pub const SHORTCUTS: &[(Shortcut, i32, u32)] = &[
     (Shortcut::Zoom(1), VK_OEM_PLUS, CTRL),
     (Shortcut::Zoom(-1), VK_OEM_MINUS, CTRL),
     (Shortcut::Zoom(0), key('0'), CTRL),
+    (Shortcut::Fullscreen, VK_F11, 0),
+    (Shortcut::CopyUrl, key('C'), CTRL | SHIFT),
+    (Shortcut::Print, key('P'), CTRL),
+    (Shortcut::History, key('H'), CTRL),
+    (Shortcut::History, key('Y'), CTRL),
 ];
 
 fn shortcut_for(event: &KeyEvent) -> Option<Shortcut> {
@@ -117,6 +126,16 @@ wrap_keyboard_handler! {
             _os_event: Option<&mut OsEvent>,
             _is_keyboard_shortcut: Option<&mut ::std::os::raw::c_int>,
         ) -> ::std::os::raw::c_int {
+            // Escape closes a Peek or leaves a fullscreen page (pages keep Escape otherwise).
+            if let (Some(e), Some(b)) = (event, _browser.as_ref())
+                && e.windows_key_code == VK_ESCAPE
+                && e.type_ == KeyEventType::RAWKEYDOWN
+                && e.modifiers & (SHIFT | CTRL | ALT) == 0
+                && (browser::is_peek_browser(b.identifier()) || browser::Burrow::peek_open() || browser::page_fullscreen())
+            {
+                browser::later(|b| b.shortcut(Shortcut::Escape));
+                return 1;
+            }
             match event.and_then(shortcut_for) {
                 Some(s) => {
                     browser::later(move |b| b.shortcut(s));
@@ -163,6 +182,44 @@ wrap_client! {
         fn permission_handler(&self) -> Option<PermissionHandler> { Some(Permissions::new()) }
         fn context_menu_handler(&self) -> Option<ContextMenuHandler> { Some(PageMenu::new()) }
         fn find_handler(&self) -> Option<FindHandler> { Some(Find::new()) }
+        fn request_handler(&self) -> Option<RequestHandler> { Some(Navigation::new()) }
+        fn focus_handler(&self) -> Option<FocusHandler> { Some(Focus::new()) }
+    }
+}
+
+wrap_request_handler! {
+    struct Navigation {}
+    impl RequestHandler {
+        /// A link click in a pinned tab that leaves its site opens in a Peek instead (D-022).
+        /// CEF needs the answer now, so this is one of the few synchronous `browser::with` calls.
+        fn on_before_browse(
+            &self,
+            browser: Option<&mut Browser>,
+            frame: Option<&mut Frame>,
+            request: Option<&mut Request>,
+            user_gesture: ::std::os::raw::c_int,
+            is_redirect: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int {
+            let (Some(browser), Some(frame), Some(request)) = (browser, frame, request) else { return 0 };
+            let source = request.transition_type().get_raw() & TransitionType::SOURCE_MASK.get_raw();
+            if user_gesture == 0 || is_redirect != 0 || frame.is_main() == 0 || source != TransitionType::LINK.get_raw() {
+                return 0;
+            }
+            let to = CefString::from(&request.url()).to_string();
+            let from = CefString::from(&frame.url()).to_string();
+            let id = browser.identifier();
+            browser::with(|b| b.intercept_navigation(id, &from, &to)).unwrap_or(false) as _
+        }
+    }
+}
+
+wrap_focus_handler! {
+    struct Focus {}
+    impl FocusHandler {
+        fn on_got_focus(&self, browser: Option<&mut Browser>) {
+            let Some(id) = id_of(browser) else { return };
+            browser::later(move |b| b.on_tab_focused(id));
+        }
     }
 }
 
@@ -219,6 +276,7 @@ const MENU_OPEN_LINK_BACKGROUND: i32 = 26502;
 const MENU_COPY_LINK: i32 = 26503;
 const MENU_SEARCH: i32 = 26504;
 const MENU_INSPECT: i32 = 26505;
+const MENU_OPEN_LINK_PEEK: i32 = 26506;
 
 wrap_context_menu_handler! {
     struct PageMenu {}
@@ -235,8 +293,9 @@ wrap_context_menu_handler! {
             if !CefString::from(&params.link_url()).to_string().is_empty() {
                 model.insert_item_at(0, MENU_OPEN_LINK, Some(&label("Open Link in New Tab")));
                 model.insert_item_at(1, MENU_OPEN_LINK_BACKGROUND, Some(&label("Open Link in Background Tab")));
-                model.insert_item_at(2, MENU_COPY_LINK, Some(&label("Copy Link Address")));
-                model.insert_separator_at(3);
+                model.insert_item_at(2, MENU_OPEN_LINK_PEEK, Some(&label("Open Link in Peek")));
+                model.insert_item_at(3, MENU_COPY_LINK, Some(&label("Copy Link Address")));
+                model.insert_separator_at(4);
             }
             let selection = CefString::from(&params.selection_text()).to_string();
             if !selection.trim().is_empty() && params.is_editable() == 0 {
@@ -259,9 +318,11 @@ wrap_context_menu_handler! {
         ) -> ::std::os::raw::c_int {
             let Some(params) = params else { return 0 };
             let link = CefString::from(&params.link_url()).to_string();
+            let from = browser.as_ref().map(|b| b.identifier());
             match command_id {
-                MENU_OPEN_LINK => browser::later(move |b| b.open_tab_from(link, true)),
-                MENU_OPEN_LINK_BACKGROUND => browser::later(move |b| b.open_tab_from(link, false)),
+                MENU_OPEN_LINK => browser::later(move |b| b.open_link(from, link, LinkKind::ForegroundTab)),
+                MENU_OPEN_LINK_BACKGROUND => browser::later(move |b| b.open_link(from, link, LinkKind::BackgroundTab)),
+                MENU_OPEN_LINK_PEEK => browser::later(move |b| b.peek_link(from, link)),
                 MENU_COPY_LINK => crate::clipboard::set(&link),
                 MENU_SEARCH => {
                     let text = CefString::from(&params.selection_text()).to_string();
@@ -320,6 +381,13 @@ wrap_display_handler! {
             let Some(url) = icon_urls.and_then(|l| l.clone().into_iter().next()) else { return };
             browser::later(move |b| b.on_favicon(id, url));
         }
+
+        /// A page (usually a video) entered or left fullscreen. Burrow makes the window
+        /// fullscreen and hides the sidebar for it.
+        fn on_fullscreen_mode_change(&self, browser: Option<&mut Browser>, fullscreen: ::std::os::raw::c_int) {
+            let Some(id) = id_of(browser) else { return };
+            browser::later(move |b| b.on_page_fullscreen(id, fullscreen != 0));
+        }
     }
 }
 
@@ -360,15 +428,19 @@ wrap_life_span_handler! {
         ) -> ::std::os::raw::c_int {
             let url = string(target_url);
             let d = target_disposition;
-            // Links that want a tab: we open the tab ourselves and cancel Chrome's.
-            if d == WindowOpenDisposition::NEW_FOREGROUND_TAB
-                || d == WindowOpenDisposition::NEW_BACKGROUND_TAB
-                || d == WindowOpenDisposition::SINGLETON_TAB
-                || d == WindowOpenDisposition::NEW_WINDOW
-                || d == WindowOpenDisposition::OFF_THE_RECORD
-            {
-                let foreground = d != WindowOpenDisposition::NEW_BACKGROUND_TAB;
-                browser::later(move |b| b.open_tab_from(url, foreground));
+            let from = _browser.map(|b| b.identifier());
+            // Links that want a tab: we open the tab (or Peek) ourselves and cancel Chrome's.
+            // target=_blank asks for a foreground tab; Shift+click asks for a window.
+            let kind = match d {
+                WindowOpenDisposition::NEW_FOREGROUND_TAB => Some(LinkKind::NewTab),
+                WindowOpenDisposition::NEW_BACKGROUND_TAB => Some(LinkKind::BackgroundTab),
+                WindowOpenDisposition::SINGLETON_TAB
+                | WindowOpenDisposition::NEW_WINDOW
+                | WindowOpenDisposition::OFF_THE_RECORD => Some(LinkKind::ForegroundTab),
+                _ => None,
+            };
+            if let Some(kind) = kind {
+                browser::later(move |b| b.open_link(from, url, kind));
                 return 1;
             }
             // Real popups (window.open) keep their opener; TabViewDelegate turns them into tabs.
@@ -378,8 +450,16 @@ wrap_life_span_handler! {
         /// Closing one tab must not close the window: CEF's default (0) for a Views-hosted browser
         /// closes the parent window. Returning 1 lets just this browser go once its view is
         /// removed. While the whole window is closing, the default is what we want (D-010).
-        fn do_close(&self, _browser: Option<&mut Browser>) -> ::std::os::raw::c_int {
-            (!browser::is_closing()) as _
+        fn do_close(&self, browser: Option<&mut Browser>) -> ::std::os::raw::c_int {
+            if browser::is_closing() {
+                return 0;
+            }
+            // A page closing itself (window.close()): remove its view so the browser can go.
+            // When Burrow closed it, the tab or Peek is already gone and this does nothing.
+            if let Some(id) = id_of(browser) {
+                browser::later(move |b| b.on_close_requested(id));
+            }
+            1
         }
 
         fn on_before_close(&self, browser: Option<&mut Browser>) {
@@ -514,7 +594,7 @@ wrap_life_span_handler! {
             _no_javascript_access: Option<&mut ::std::os::raw::c_int>,
         ) -> ::std::os::raw::c_int {
             let url = string(target_url);
-            browser::later(move |b| b.open_tab_from(url, true));
+            browser::later(move |b| b.open_link(None, url, LinkKind::ForegroundTab));
             1
         }
 

@@ -6,6 +6,7 @@ mod browser;
 mod clients;
 mod clipboard;
 mod consts;
+mod external;
 mod paths;
 mod switches;
 mod task;

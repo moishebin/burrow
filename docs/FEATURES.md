@@ -10,7 +10,7 @@ Priority: **P0** = needed before the owner can switch from Arc · P1 = soon afte
 |---|---|---|
 | Chromium engine without Google services (CEF 154) | ✅ | D-001, D-006. Verified. |
 | Builds for Windows from WSL | ✅ | `scripts/build-win.sh` (D-002) |
-| Single window; popups and "new window" become tabs | ✅ | Verified: `target=_blank` → tab; `window.open` → tab with `opener` kept (OAuth works) |
+| Single window; popups and "new window" become tabs | ✅ | Verified: `target=_blank` → Peek (or tab); `window.open` → Peek with `opener` kept (OAuth works) |
 | Left sidebar (Arc layout) | ✅ | Verified with screenshots |
 | **Spaces**: several in one window, switcher, Ctrl+1…9 | ✅ | Verified |
 | **Separate logins per space** (profiles) | ✅ | Verified: a cookie set in one space isn't visible in another |
@@ -30,30 +30,39 @@ Priority: **P0** = needed before the owner can switch from Arc · P1 = soon afte
 | Camera / mic / notification permission prompts | ✅ | D-014. Verified the allow-and-remember flow. |
 | Page context menu: open link in new tab, copy link, search | ✅ | D-014 |
 | App icon (window/taskbar) | ✅ | `scripts/make-icon.py` |
+| Site icons for every tab, also never-loaded ones | ✅ | D-025. Saved on disk; found from the page's `<link rel=icon>`. Verified on Xvfb (fixed the owner's globe-icon report). |
 
 ## P1
 
 | Feature | Status | Notes |
 |---|---|---|
 | Search open tabs from the address box | ✅ | ↑↓ + Enter picks a tab, in any space |
+| **Air Traffic Control** (rules send links to a space) | ✅ | D-021. Verified on Xvfb: a matching link opened in the rule's space. Also an agent tool. |
+| **Peek** (links open in a card over the page) | ✅ | D-022. Verified on Xvfb with real clicks; not yet on Windows. |
+| History + history search in the address box | ✅ | D-023. Ctrl+H. Verified on Xvfb. |
+| Split View | ✅ | D-026. Verified on Xvfb. |
+| Fullscreen videos (and F11) | ✅ | D-026. Verified on Xvfb, Esc leaves. |
+| Boosts (custom CSS per site) | ✅ | D-026. Verified on Xvfb. |
+| Mute tab, duplicate tab, copy address, print | ✅ | D-026 |
+| Pages that call `window.close()` close | ✅ | D-027 (was broken) |
 | Find in page (Ctrl+F) | ✅ | D-014 |
 | Auto-archive Today tabs (default 12h) + Recently Closed + Ctrl+Shift+T | ✅ | Unit-tested |
 | Keyboard shortcuts (see README) | ✅ | Verified with real keys on Xvfb: Ctrl+T/W/D/F, Ctrl+Shift+T, Esc |
 | Sidebar collapse (Ctrl+S) + hover the left edge to peek | ✅ | Verified with real input on Xvfb. A hidden sidebar used to leave no way back (reported by the owner, D-016). |
 | Space colors, icons, rename, delete | ✅ | |
 | Search engine setting | ✅ | Default Google (D-011) |
-| Favicon cache on disk (show icons for never-loaded tabs offline) | 🟡 | Falls back to `<origin>/favicon.ico` |
-| Command bar with history search | ⬜ | Open tabs only so far |
-| Peek / little browser for links from pinned tabs | ⬜ | |
-| Split view | ⬜ | |
+| Favicon cache on disk (show icons for never-loaded tabs offline) | ✅ | D-025 |
+| Command bar with history search | ✅ | Address box: open tabs, then history (D-023) |
+| Peek / little browser for links from pinned tabs | ✅ | D-022 |
+| Split view | ✅ | Two tabs (D-026). Not resizable yet. |
 | Password saving / autofill | ⬜ | Alloy has no password UI (D-010). Likely a built-in manager or an extension later. |
-| Default-browser registration on Windows | ⬜ | Needs an installer |
+| Default-browser registration on Windows | 🟡 | D-024. + → Make Burrow Your Default Browser… writes per-user registry entries and opens Settings. Links hand over to a running Burrow (verified on Linux). Windows side not yet checked by hand. |
 | Installer + auto-update | 🟡 | `scripts/install-win.sh`: per-user install + Start menu shortcut. Release archives for Windows and Linux (`scripts/package.sh`, D-020). No auto-update yet. |
 | Exe file icon (Explorer) | ✅ | `build.rs` + embed-resource (llvm-rc) |
-| Zoom indicator, per-site zoom memory | 🟡 | Ctrl+=/−/0 work; no indicator |
-| History page | ⬜ | |
+| Zoom indicator, per-site zoom memory | ✅ | D-026 |
+| History page | ✅ | A History list in the sidebar (Ctrl+H), D-023 |
 | Notifications shown as Windows toasts | ⬜ | Permission prompt exists; Alloy may not deliver toasts |
-| **Agent control** (MCP server, CLI, local API): tabs, spaces, folders, read/screenshot/click/type in any tab | ✅ | D-018. Verified on Linux/Xvfb: background tabs read, screenshotted, clicked and typed into while the user's tab stays shown; MCP over stdio; auth/Origin/Host checks. Page tools can be switched off; tab and space tools always work (D-019). Windows exe verified as a client from WSL; the server side on Windows is not yet checked by hand. |
+| **Agent control** (MCP server, CLI, local API): tabs, spaces, folders, read/screenshot/click/type in any tab | ✅ | D-018. Verified on Linux/Xvfb: background tabs read, screenshotted, clicked and typed into while the user's tab stays shown; MCP over stdio; auth/Origin/Host checks. Page tools can be switched off; tab and space tools always work (D-019). Boosts, history, split view, Peek, zoom, mute, duplicate, Air Traffic Control and link settings too (D-028). Windows exe verified as a client from WSL; the server side on Windows is not yet checked by hand. |
 
 ## P2
 
@@ -63,4 +72,4 @@ Priority: **P0** = needed before the owner can switch from Arc · P1 = soon afte
 | Built-in ad blocker | 💤 | |
 | macOS / Linux packages | 🟡 | Linux `.tar.gz` since 0.0.1 (D-020). macOS needs a Mac to build (app bundle, signing). |
 | Sync between machines | 💤 | |
-| Boosts / custom CSS | 💤 | |
+| Boosts / custom CSS | ✅ | CSS only (D-026); no per-site JavaScript |

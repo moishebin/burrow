@@ -537,3 +537,152 @@ fn page_tools_are_known_tools_and_tab_tools_are_not_page_tools() {
         assert!(!agent::is_page_tool(name), "{name}");
     }
 }
+
+#[test]
+fn split_view_shows_both_tabs_while_either_is_active() {
+    let mut s = State::default();
+    let a = open(&mut s, "https://a.example");
+    let b = open(&mut s, "https://b.example");
+    let c = open(&mut s, "https://c.example");
+    s.apply(Command::SelectTab { tab_id: a.clone() }).unwrap();
+    s.apply(Command::SplitView { tab_id: b.clone() }).unwrap();
+    assert_eq!(s.visible_tabs(), vec![a.clone(), b.clone()]);
+    s.apply(Command::SelectTab { tab_id: b.clone() }).unwrap();
+    assert_eq!(s.visible_tabs(), vec![a.clone(), b.clone()], "the halves keep their sides");
+    s.apply(Command::SelectTab { tab_id: c.clone() }).unwrap();
+    assert_eq!(s.visible_tabs(), vec![c.clone()]);
+    assert_eq!(s.apply(Command::SplitView { tab_id: c.clone() }), Err(CommandError::BadSplit));
+
+    // Closing one half shows the other and ends the split.
+    s.apply(Command::SelectTab { tab_id: a.clone() }).unwrap();
+    s.apply(Command::CloseTab { tab_id: b.clone() }).unwrap();
+    assert_eq!(s.visible_tabs(), vec![a.clone()]);
+    assert_eq!(s.active_space().split, None);
+}
+
+#[test]
+fn split_ends_when_a_half_leaves_the_space_or_is_cleared() {
+    let mut s = State::default();
+    let a = open(&mut s, "https://a.example");
+    let b = open(&mut s, "https://b.example");
+    s.apply(Command::SplitView { tab_id: a.clone() }).unwrap();
+    let home = s.active_space.clone();
+    s.apply(Command::NewSpace { name: "W".into(), icon: String::new(), profile_id: None }).unwrap();
+    let work = s.active_space.clone();
+    s.active_space = home.clone();
+    let to = Location { space_id: Some(work), section: Section::Today, parent: None, index: Some(0) };
+    s.apply(Command::MoveNode { node_id: a.clone(), to }).unwrap();
+    assert_eq!(s.space(&home).unwrap().split, None);
+
+    let c = open(&mut s, "https://c.example");
+    s.apply(Command::SplitView { tab_id: b.clone() }).unwrap();
+    assert!(s.active_space().split.is_some());
+    s.apply(Command::ClearToday).unwrap();
+    assert_eq!(s.active_space().split, None);
+    let _ = c;
+}
+
+#[test]
+fn auto_archive_keeps_both_halves_of_a_shown_split() {
+    let mut s = State::default();
+    let a = open(&mut s, "https://a.example");
+    let b = open(&mut s, "https://b.example");
+    s.apply(Command::SplitView { tab_id: a.clone() }).unwrap();
+    for t in &mut s.active_space_mut().today {
+        t.last_active_ms = 0;
+    }
+    assert!(s.archive_stale(100 * 3_600_000).is_empty());
+    assert!(s.tab(&a).is_some() && s.tab(&b).is_some());
+}
+
+#[test]
+fn duplicate_opens_a_copy_below_and_shows_it() {
+    let mut s = State::default();
+    let a = open(&mut s, "https://a.example/page");
+    let _b = open(&mut s, "https://b.example"); // today: b, a
+    s.apply(Command::DuplicateTab { tab_id: a.clone() }).unwrap();
+    let today = &s.active_space().today;
+    assert_eq!(today.len(), 3);
+    assert_eq!(today[1].id, a);
+    assert_eq!(today[2].url, "https://a.example/page");
+    assert_eq!(s.active_tab().unwrap().id, today[2].id);
+}
+
+#[test]
+fn routes_are_cleaned_replaced_and_removed_with_their_space() {
+    let mut s = State::default();
+    let home = s.active_space.clone();
+    s.apply(Command::NewSpace { name: "W".into(), icon: String::new(), profile_id: None }).unwrap();
+    let work = s.active_space.clone();
+    s.apply(Command::AddRoute { pattern: " https://www.Figma.com/ ".into(), space_id: work.clone() }).unwrap();
+    assert_eq!(s.routes[0].pattern, "figma.com");
+    s.apply(Command::AddRoute { pattern: "figma.com".into(), space_id: home.clone() }).unwrap();
+    assert_eq!(s.routes.len(), 1, "the same pattern replaces the old rule");
+    assert_eq!(s.routes[0].space_id, home);
+    assert_eq!(s.apply(Command::AddRoute { pattern: "  ".into(), space_id: work.clone() }), Err(CommandError::BadPattern));
+    assert!(s.apply(Command::AddRoute { pattern: "x.com".into(), space_id: "nope".into() }).is_err());
+
+    s.apply(Command::AddRoute { pattern: "linear.app".into(), space_id: work.clone() }).unwrap();
+    s.apply(Command::DeleteSpace { space_id: work }).unwrap();
+    assert_eq!(s.routes.len(), 1);
+    let id = s.routes[0].id.clone();
+    s.apply(Command::RemoveRoute { route_id: id }).unwrap();
+    assert!(s.routes.is_empty());
+}
+
+#[test]
+fn old_state_files_load_with_new_fields_defaulted() {
+    let mut v = serde_json::to_value(State::default()).unwrap();
+    let o = v.as_object_mut().unwrap();
+    o.remove("routes");
+    o.remove("zoom");
+    o.remove("boosts");
+    o["settings"].as_object_mut().unwrap().remove("peek_new_tabs");
+    let s: State = serde_json::from_value(v).unwrap();
+    assert!(s.routes.is_empty() && s.zoom.is_empty());
+    assert!(s.settings.peek_new_tabs && s.settings.peek_from_pinned);
+}
+
+#[test]
+fn agents_can_manage_air_traffic_control() {
+    use crate::agent::run_model_tool;
+    let mut s = State::default();
+    let space = s.active_space.clone();
+    let add = serde_json::json!({ "action": "add", "pattern": "figma.com", "space_id": space });
+    let out = run_model_tool(&mut s, "air_traffic_control", &add).unwrap().unwrap();
+    let id = out.result["rules"][0]["route_id"].as_str().unwrap().to_string();
+    assert_eq!(out.result["rules"][0]["pattern"], "figma.com");
+    let bad = serde_json::json!({ "action": "add", "pattern": "", "space_id": space });
+    assert!(run_model_tool(&mut s, "air_traffic_control", &bad).unwrap().is_err());
+    let rm = serde_json::json!({ "action": "remove", "route_id": id });
+    let out = run_model_tool(&mut s, "air_traffic_control", &rm).unwrap().unwrap();
+    assert_eq!(out.result["rules"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn agent_split_and_duplicate_leave_the_users_view_alone() {
+    use crate::agent::run_model_tool;
+    use serde_json::json;
+    let mut s = State::default();
+    let a = open(&mut s, "https://a.example");
+    let b = open(&mut s, "https://b.example");
+    let c = open(&mut s, "https://c.example"); // shown
+    let out = run_model_tool(&mut s, "split_view", &json!({ "tab_id": a, "other_tab_id": b })).unwrap().unwrap();
+    assert_eq!(out.result["split"], true);
+    assert_eq!(s.active_tab().unwrap().id, c, "the user still sees c");
+    assert_eq!(s.visible_tabs(), vec![c.clone()]);
+    s.apply(Command::SelectTab { tab_id: b.clone() }).unwrap();
+    assert_eq!(s.visible_tabs(), vec![a.clone(), b.clone()]);
+    assert!(run_model_tool(&mut s, "split_view", &json!({ "tab_id": a, "other_tab_id": a })).unwrap().is_err());
+    run_model_tool(&mut s, "split_view", &json!({ "action": "close", "tab_id": a })).unwrap().unwrap();
+    assert_eq!(s.active_space().split, None);
+
+    let out = run_model_tool(&mut s, "duplicate_tab", &json!({ "tab_id": c })).unwrap().unwrap();
+    let copy = out.result["tab_id"].as_str().unwrap().to_string();
+    assert_ne!(copy, c);
+    assert_eq!(s.tab(&copy).unwrap().url, "https://c.example");
+    assert_eq!(s.active_tab().unwrap().id, b, "a background copy doesn't change the shown tab");
+
+    let out = run_model_tool(&mut s, "link_settings", &json!({ "peek_new_tabs": false })).unwrap().unwrap();
+    assert_eq!(out.result, json!({ "peek_new_tabs": false, "peek_from_pinned": true }));
+}

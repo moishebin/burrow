@@ -14,7 +14,12 @@ An open-source browser in the spirit of Arc, built with Rust and Chromium (via C
 - **Favorites**: the app tiles at the top, separate for each space.
 - **Today**: unpinned tabs live below the line and are auto-archived after 12 hours of disuse (configurable). Ctrl+Shift+T brings them back.
 - **Import from Arc**: spaces, folders, pinned tabs and favorites from Arc's local data (Windows).
-- **One window, always.** Popups and "open in new window" become tabs.
+- **One window, always.** Popups and "open in new window" become tabs or Peeks.
+- **Peek**: links that would open a new tab, and links in pinned tabs that leave their site, open in a card over the page. Esc closes it; "Open as Tab" keeps it.
+- **Air Traffic Control**: rules like "figma.com → Work" send links to the right space, including links from other apps when Burrow is your default browser.
+- **Split View**: two tabs side by side (right-click a tab → Open in Split View).
+- **History** (Ctrl+H), searched as you type in the address box.
+- **Boosts**: your own CSS for a site. Zoom is remembered per site. Videos go fullscreen properly.
 
 Status: early, but usable day to day on Windows. See [docs/FEATURES.md](docs/FEATURES.md) for what works and what doesn't yet, and [docs/DECISIONS.md](docs/DECISIONS.md) for the reasoning behind each choice.
 
@@ -60,7 +65,7 @@ cargo test -p burrow-core
 
 ## Agents
 
-AI agents can drive Burrow: open, close, move and pin tabs, set up spaces and folders, and read, screenshot, click and type in **any** tab, even one you aren't looking at. They work in the background, so your own tab stays put. A pulsing **Agent** badge in the sidebar shows when one is working, and **+ → Block Agents from Pages** stops agents from reading or using pages (they can still manage tabs and spaces).
+AI agents can drive Burrow: open, close, move and pin tabs, set up spaces and folders, and read, screenshot, click and type in **any** tab, even one you aren't looking at. They can also set Boosts, search history, set up split views, Air Traffic Control rules and Peek settings, zoom, mute and duplicate tabs. They work in the background, so your own tab stays put. A pulsing **Agent** badge in the sidebar shows when one is working, and **+ → Block Agents from Pages** stops agents from reading or using pages (they can still manage tabs and spaces).
 
 Add Burrow as an MCP server to your agent. For Claude Code:
 
@@ -86,7 +91,7 @@ Under the hood it's a local HTTP API (`POST http://127.0.0.1:<port>/v1/<tool>`, 
 
 | Keys | Action |
 |---|---|
-| Ctrl+T | New tab (also searches your open tabs) |
+| Ctrl+T | New tab (also searches your open tabs and history) |
 | Ctrl+L | Edit address |
 | Ctrl+W | Close tab (pinned: unload) |
 | Ctrl+D | Pin / unpin |
@@ -96,6 +101,12 @@ Under the hood it's a local HTTP API (`POST http://127.0.0.1:<port>/v1/<tool>`, 
 | Ctrl+F | Find in page |
 | Ctrl+Shift+T | Reopen closed tab |
 | Alt+← / → | Back / forward |
+| Ctrl+H | History |
+| Ctrl+Shift+C | Copy the page's address |
+| Ctrl+P | Print |
+| Ctrl+= / − / 0 | Zoom (remembered per site) |
+| F11 | Full screen |
+| Esc | Close a Peek, leave a fullscreen video |
 | F12 | DevTools |
 
 ## License

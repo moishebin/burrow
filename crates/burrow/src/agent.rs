@@ -166,6 +166,17 @@ fn serve(mut stream: TcpStream, token: &str, port: u16) {
     let route = req.path.trim_start_matches('/').strip_prefix("v1/").unwrap_or("").to_string();
     match (req.method.as_str(), route.as_str()) {
         ("GET", "tools") => respond(&mut stream, 200, &json!({ "ok": true, "result": tools_json() })),
+        // Links handed over by a second `burrow.exe <url>` (D-024). Not an agent tool.
+        ("POST", "external") => {
+            let urls: Vec<String> = serde_json::from_slice::<Value>(&req.body)
+                .ok()
+                .and_then(|v| serde_json::from_value(v["urls"].clone()).ok())
+                .unwrap_or_default();
+            task::post_ui(move || {
+                browser::with(|b| urls.into_iter().for_each(|u| b.open_external(u)));
+            });
+            respond(&mut stream, 200, &json!({ "ok": true }))
+        }
         ("POST", tool) if burrow_core::agent::tool(tool).is_some() => {
             let args: Value = if req.body.is_empty() {
                 json!({})
@@ -218,6 +229,13 @@ fn http(endpoint: &Endpoint, method: &str, path: &str, body: &Value) -> std::io:
     stream.read_to_end(&mut response)?;
     let split = response.windows(4).position(|w| w == b"\r\n\r\n").map_or(response.len(), |i| i + 4);
     serde_json::from_slice(&response[split..]).map_err(std::io::Error::other)
+}
+
+/// Gives links to the running Burrow. False if none is running.
+pub fn send_external(urls: &[String]) -> bool {
+    read_endpoint()
+        .and_then(|e| http(&e, "POST", "/v1/external", &json!({ "urls": urls })).ok())
+        .is_some_and(|v| v["ok"] == true)
 }
 
 /// Starts Burrow in the background (when an agent calls and it isn't running).
@@ -286,7 +304,7 @@ pub fn main_if_requested() -> Option<i32> {
             take_data_dir(&mut args);
             Some(run_cli(&args[1..]))
         }
-        _ => None,
+        _ => crate::external::forward_or_keep(crate::external::urls_from_args(&args)).then_some(0),
     }
 }
 
@@ -385,7 +403,9 @@ const MCP_INSTRUCTIONS: &str = "Burrow is an Arc-style browser with one window. 
 favorites (app tiles), pinned tabs in folders (each has a fixed place and a home URL), and today's tabs. Spaces usually \
 have separate logins. Start with list_spaces or list_tabs to get ids. open_tab opens in the background by default so \
 you don't disturb the user; pass focus=true to show a tab. read_page, screenshot, click, type_text, press_key, \
-wait_for and eval_js work on any tab, shown or not. Prefer read_page format=elements to find what to click.";
+wait_for and eval_js work on any tab, shown or not. Prefer read_page format=elements to find what to click. \
+Also: boost (a site's custom CSS), search_history, split_view, duplicate_tab, set_zoom, mute_tab, \
+air_traffic_control (which space a site's links open in), link_settings and peek.";
 
 fn run_mcp() -> i32 {
     let stdin = std::io::stdin();

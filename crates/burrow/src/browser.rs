@@ -5,13 +5,21 @@
 
 use std::{cell::RefCell, collections::HashMap};
 
-use burrow_core::{store, Command, Effect, Id, Section, State};
+use burrow_core::{
+    history::{self, History},
+    links::{self, Destination, LinkKind},
+    store, Command, Effect, Id, Location, Section, State,
+};
 use cef::*;
 use serde::{Deserialize, Serialize};
 
 use crate::{clients, consts, paths, task, views};
 
+mod icons;
+mod peek;
 mod tools;
+
+pub use peek::is_peek_browser;
 
 thread_local! {
     static BURROW: RefCell<Option<Burrow>> = const { RefCell::new(None) };
@@ -23,6 +31,14 @@ static CLOSING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::n
 
 pub fn is_closing() -> bool {
     CLOSING.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// A page is fullscreen (a video). The key handler reads it: Escape leaves fullscreen, which
+/// Chrome does itself but CEF's Alloy style doesn't.
+static PAGE_FULLSCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn page_fullscreen() -> bool {
+    PAGE_FULLSCREEN.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// Runs `f` with the controller, if it exists and isn't already borrowed.
@@ -55,6 +71,7 @@ struct Nav {
     loading: bool,
     can_back: bool,
     can_forward: bool,
+    muted: bool,
 }
 
 #[derive(Clone, Serialize)]
@@ -204,6 +221,18 @@ pub struct Burrow {
     /// An agent called a tool in the last few seconds; the sidebar shows it.
     agent_active: bool,
     agent_generation: u64,
+    /// The tabs in the content area, left to right (two in split view).
+    visible: Vec<Id>,
+    peek: Option<peek::Peek>,
+    history: History,
+    history_pending: bool,
+    /// The window is fullscreen: Burrow's own (F11) or because a page asked (videos).
+    fullscreen: bool,
+    /// The tab whose page went fullscreen; it alone fills the window.
+    page_fullscreen: Option<Id>,
+    /// Browsers of closed Peeks that haven't finished closing; the window waits for them.
+    dying_peeks: Vec<i32>,
+    icons: icons::Icons,
 }
 
 /// Messages from the sidebar that aren't model commands.
@@ -238,6 +267,23 @@ enum Act {
     WindowClose,
     SetSystemTitleBar { on: bool },
     SetAgentPageAccess { on: bool },
+    /// History matches for what is typed in the address box; answered with `burrow.suggestions`.
+    Suggest { query: String },
+    /// The History dialog's list; answered with `burrow.history`.
+    HistoryList { query: String },
+    DeleteHistory { url: String },
+    ClearHistory,
+    SetMuted { tab_id: Id, muted: bool },
+    SetPeek { new_tabs: bool, from_pinned: bool },
+    ClosePeek,
+    ExpandPeek,
+    /// Reset the shown tab's zoom to 100%.
+    ResetZoom,
+    /// Custom CSS for a host ("Boost"); empty removes it.
+    SetBoost { host: String, css: String },
+    Print,
+    /// Register Burrow as a browser with Windows and open the Default Apps settings.
+    MakeDefaultBrowser,
 }
 
 /// Starts Burrow: loads the state and creates the main window. Called once, on the UI thread.
@@ -263,7 +309,14 @@ pub fn start() {
     .expect("create sidebar");
 
     let content = panel_create(None).expect("create content panel");
-    content.set_to_fill_layout();
+    // Hidden tabs are skipped by the layout, so one tab fills the area and two split it.
+    content.set_to_box_layout(Some(&BoxLayoutSettings {
+        horizontal: 1,
+        between_child_spacing: consts::CARD_MARGIN,
+        cross_axis_alignment: AxisAlignment::STRETCH,
+        default_flex: 1,
+        ..Default::default()
+    }));
     content.set_background_color(0xFFFFFFFF);
 
     BURROW.with(|b| {
@@ -293,6 +346,14 @@ pub fn start() {
             next_devtools_id: 1,
             agent_active: false,
             agent_generation: 0,
+            visible: Vec::new(),
+            peek: None,
+            history: history::load(&paths::history_file()),
+            history_pending: false,
+            fullscreen: false,
+            page_fullscreen: None,
+            dying_peeks: Vec::new(),
+            icons: icons::Icons::load(),
         })
     });
     crate::agent::start_server();
@@ -303,6 +364,17 @@ pub fn start() {
 
 fn cef(s: &str) -> CefString {
     CefString::from(s)
+}
+
+/// A string as a JavaScript literal.
+fn js_string(s: &str) -> String {
+    serde_json::to_string(s).unwrap_or_default()
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis() as u64)
 }
 
 /// Converts a CSS `#rrggbb` color to CEF's ARGB.
@@ -333,26 +405,12 @@ fn mix_with_white(c: u32, amount: f32) -> u32 {
 impl Burrow {
     /// Lays out the window once CEF has created it.
     pub fn attach(&mut self, window: &mut Window) {
-        let layout = window.set_to_box_layout(Some(&BoxLayoutSettings {
-            horizontal: 1,
-            inside_border_insets: Insets {
-                top: consts::CARD_MARGIN,
-                left: 0,
-                bottom: consts::CARD_MARGIN,
-                right: consts::CARD_MARGIN,
-            },
-            cross_axis_alignment: AxisAlignment::STRETCH,
-            ..Default::default()
-        }));
         window.add_child_view(Some(&mut View::from(&self.sidebar)));
         window.add_child_view(Some(&mut View::from(&self.content)));
-        if let Some(layout) = layout {
-            layout.set_flex_for_view(Some(&mut View::from(&self.sidebar)), 0);
-            layout.set_flex_for_view(Some(&mut View::from(&self.content)), 1);
-        }
+        self.window = Some(window.clone());
+        self.layout_window();
         set_icon(window);
         clients::register_accelerators(window);
-        self.window = Some(window.clone());
         let profiles: Vec<Id> = self.state.profiles.iter().map(|p| p.id.clone()).collect();
         for p in profiles {
             self.profile(&p);
@@ -361,14 +419,33 @@ impl Burrow {
         self.sync_view();
         window.show();
         self.archive_tick();
+        // Links that started Burrow (Burrow as the default browser).
+        for url in crate::external::take_startup_urls() {
+            self.open_external(url);
+        }
+    }
+
+    /// The sidebar next to the content card; in fullscreen the content alone fills the window.
+    fn layout_window(&self) {
+        let Some(window) = &self.window else { return };
+        let m = if self.fullscreen { 0 } else { consts::CARD_MARGIN };
+        let layout = window.set_to_box_layout(Some(&BoxLayoutSettings {
+            horizontal: 1,
+            inside_border_insets: Insets { top: m, left: 0, bottom: m, right: m },
+            cross_axis_alignment: AxisAlignment::STRETCH,
+            ..Default::default()
+        }));
+        View::from(&self.sidebar).set_visible(!self.fullscreen as i32);
+        if let Some(layout) = layout {
+            layout.set_flex_for_view(Some(&mut View::from(&self.sidebar)), 0);
+            layout.set_flex_for_view(Some(&mut View::from(&self.content)), 1);
+        }
+        window.layout();
     }
 
     /// Archives stale Today tabs now and every ten minutes.
     fn archive_tick(&mut self) {
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis() as u64);
-        let effects = self.state.archive_stale(now);
+        let effects = self.state.archive_stale(now_ms());
         if !effects.is_empty() {
             for e in effects {
                 self.effect(e);
@@ -390,6 +467,7 @@ impl Burrow {
         if !self.closing {
             self.closing = true;
             CLOSING.store(true, std::sync::atomic::Ordering::Relaxed);
+            self.close_peek();
             self.save_now();
             // Remember which browser is whose now: views may forget their browser while closing.
             self.tabs.retain(|_, t| match t.view.browser() {
@@ -412,7 +490,7 @@ impl Burrow {
     }
 
     fn all_closed(&self) -> bool {
-        self.tabs.is_empty() && self.sidebar_closed
+        self.tabs.is_empty() && self.sidebar_closed && self.dying_peeks.is_empty()
     }
 
     /// Called as each browser finishes closing during shutdown.
@@ -559,6 +637,56 @@ impl Burrow {
                 self.state.settings.archive_after_hours = hours;
                 self.changed();
             }
+            Act::Suggest { query } => {
+                let hits = self.history.search(&query, 8, now_ms());
+                let json = serde_json::to_string(&hits).unwrap_or_default();
+                self.run_in_sidebar(&format!("window.burrow && burrow.suggestions({}, {json})", js_string(&query)));
+            }
+            Act::HistoryList { query } => {
+                let hits = self.history.search(&query, 300, now_ms());
+                let json = serde_json::to_string(&hits).unwrap_or_default();
+                self.run_in_sidebar(&format!("window.burrow && burrow.history({}, {json})", js_string(&query)));
+            }
+            Act::DeleteHistory { url } => {
+                self.history.remove(&url);
+                self.schedule_history_save();
+            }
+            Act::ClearHistory => {
+                self.history = History::default();
+                self.schedule_history_save();
+                self.toast = Some("History cleared.".into());
+                self.push_state();
+            }
+            Act::SetMuted { tab_id, muted } => {
+                self.set_muted(&tab_id, muted);
+            }
+            Act::SetPeek { new_tabs, from_pinned } => {
+                self.state.settings.peek_new_tabs = new_tabs;
+                self.state.settings.peek_from_pinned = from_pinned;
+                self.changed();
+            }
+            Act::ClosePeek => self.close_peek(),
+            Act::ExpandPeek => self.expand_peek(),
+            Act::ResetZoom => {
+                self.with_active_browser(|b| {
+                    if let Some(h) = b.host() {
+                        h.set_zoom_level(0.0);
+                    }
+                });
+                self.remember_zoom();
+            }
+            Act::SetBoost { host, css } => {
+                self.set_boost(&host, &css);
+            }
+            Act::Print => self.with_active_browser(|b| {
+                if let Some(h) = b.host() {
+                    h.print();
+                }
+            }),
+            Act::MakeDefaultBrowser => {
+                self.toast = Some(crate::external::register_default_browser());
+                self.push_state();
+            }
         }
     }
 
@@ -595,6 +723,7 @@ impl Burrow {
     /// Call after any state change: saves soon and refreshes the sidebar.
     fn changed(&mut self) {
         self.schedule_save();
+        self.schedule_icon_scan();
         self.push_state();
     }
 
@@ -611,6 +740,26 @@ impl Burrow {
         self.save_pending = false;
         if let Err(e) = store::save(&paths::state_file(), &self.state) {
             eprintln!("Burrow: could not save state: {e}");
+        }
+        if self.history_pending {
+            self.save_history();
+        }
+    }
+
+    /// History changes on every page load, so it is written less often than the state.
+    fn schedule_history_save(&mut self) {
+        if !self.history_pending {
+            self.history_pending = true;
+            task::post_ui_delayed(10_000, || {
+                with(|b| b.save_history());
+            });
+        }
+    }
+
+    fn save_history(&mut self) {
+        self.history_pending = false;
+        if let Err(e) = history::save(&paths::history_file(), &self.history) {
+            eprintln!("Burrow: could not save history: {e}");
         }
     }
 
@@ -636,23 +785,40 @@ impl Burrow {
 
     // ---- Views ------------------------------------------------------------------------------
 
-    /// Makes the content area show `State::active_tab()`, creating its browser if needed.
+    /// Makes the content area show `State::active_tab()` (and its split partner), creating
+    /// browsers as needed.
     fn sync_view(&mut self) {
         let want = self.state.active_tab().map(|t| t.id.clone());
-        if want != self.shown {
-            if let Some(old) = self.shown.take().and_then(|id| self.tabs.get(&id)) {
-                old.view.set_visible(0);
+        let mut visible = self.state.visible_tabs();
+        if let Some(fs) = &self.page_fullscreen {
+            visible.retain(|id| id == fs);
+        }
+        if want != self.shown || visible != self.visible {
+            // A Peek belongs to the page it was opened over.
+            if want != self.shown {
+                self.close_peek();
             }
-            if let Some(id) = &want {
+            for id in &self.visible {
+                if !visible.contains(id)
+                    && let Some(t) = self.tabs.get(id) {
+                        t.view.set_visible(0);
+                    }
+            }
+            for (i, id) in visible.iter().enumerate() {
                 self.ensure_live(id);
                 if let Some(t) = self.tabs.get(id) {
+                    self.content.reorder_child_view(Some(&mut View::from(&t.view)), i as i32);
                     t.view.set_visible(1);
                 }
             }
+            let focus = want != self.shown;
             self.shown = want;
+            self.visible = visible;
             self.content.layout();
-            self.focus_content();
-            if let Some(id) = self.shown.clone() {
+            if focus {
+                self.focus_content();
+            }
+            for id in self.visible.clone() {
                 self.end_emulation(&id);
             }
         } else if self.shown.is_none() {
@@ -684,7 +850,7 @@ impl Burrow {
         let Some(view) = browser_view_create(
             Some(&mut client),
             Some(&cef(&url)),
-            Some(&BrowserSettings::default()),
+            Some(&BrowserSettings { background_color: 0xFFFFFFFF, ..Default::default() }),
             None,
             context.as_mut(),
             Some(&mut delegate),
@@ -735,12 +901,15 @@ impl Burrow {
         for tab_id in pending {
             self.ensure_live(&tab_id);
         }
-        if let Some(id) = self.shown.clone()
-            && let Some(t) = self.tabs.get(&id) {
+        for (i, id) in self.visible.clone().iter().enumerate() {
+            if let Some(t) = self.tabs.get(id) {
+                self.content.reorder_child_view(Some(&mut View::from(&t.view)), i as i32);
                 t.view.set_visible(1);
-                self.content.layout();
-                self.focus_content();
             }
+        }
+        self.content.layout();
+        self.focus_content();
+        self.schedule_icon_scan();
         self.push_state();
     }
 
@@ -765,6 +934,10 @@ impl Burrow {
         self.content.remove_child_view(Some(&mut View::from(&tab.view)));
         if self.shown.as_deref() == Some(tab_id) {
             self.shown = None;
+        }
+        self.visible.retain(|v| v != tab_id);
+        if self.page_fullscreen.as_deref() == Some(tab_id) {
+            self.set_fullscreen(false);
         }
     }
 
@@ -823,6 +996,7 @@ impl Burrow {
             w.layout();
         }
         self.apply_drag_regions();
+        self.layout_peek();
         self.push_state();
     }
 
@@ -859,7 +1033,137 @@ impl Burrow {
 
     pub fn on_window_resized(&mut self) {
         self.apply_drag_regions();
+        self.layout_peek();
         self.push_state();
+    }
+
+    /// Fullscreen hides the sidebar and the card's margins. A page's fullscreen (a video) also
+    /// hides the other half of a split view.
+    fn set_fullscreen(&mut self, on: bool) {
+        if !on {
+            // Tell the page too, if it is the one that went fullscreen.
+            if let Some(id) = self.page_fullscreen.take()
+                && let Some(h) = self.tabs.get(&id).and_then(|t| t.view.browser()).and_then(|b| b.host()) {
+                    h.exit_fullscreen(1);
+                }
+        }
+        PAGE_FULLSCREEN.store(on && self.page_fullscreen.is_some(), std::sync::atomic::Ordering::Relaxed);
+        if self.fullscreen != on {
+            self.fullscreen = on;
+            if let Some(w) = &self.window {
+                w.set_fullscreen(on as i32);
+            }
+            self.layout_window();
+        }
+        self.sync_view();
+        self.layout_peek();
+        self.push_state();
+    }
+
+    pub fn on_page_fullscreen(&mut self, browser_id: i32, on: bool) {
+        let Some(id) = self.tab_of_browser(browser_id) else { return };
+        if on {
+            self.page_fullscreen = Some(id);
+            self.set_fullscreen(true);
+        } else if self.page_fullscreen.as_deref() == Some(&*id) {
+            // The page already left fullscreen; don't ask it to again.
+            self.page_fullscreen = None;
+            self.set_fullscreen(false);
+        }
+    }
+
+    /// Remembers the shown tab's zoom for its site, so the site opens at that zoom next time.
+    fn remember_zoom(&mut self) {
+        let Some(id) = self.shown.clone() else { return };
+        let Some(level) = self.tabs.get(&id).and_then(|t| t.view.browser()).and_then(|b| b.host()).map(|h| h.zoom_level()) else {
+            return;
+        };
+        let host = self.state.tab(&id).map(|t| links::host_of(&t.url)).unwrap_or_default();
+        if host.is_empty() {
+            return;
+        }
+        if level.abs() < 0.01 {
+            self.state.zoom.remove(&host);
+        } else {
+            self.state.zoom.insert(host, level);
+        }
+        self.changed();
+    }
+
+    /// Applies the remembered zoom of the tab's site.
+    fn apply_zoom(&self, tab_id: &str) {
+        let Some(tab) = self.state.tab(tab_id) else { return };
+        let level = self.state.zoom.get(&links::host_of(&tab.url)).copied().unwrap_or(0.0);
+        if let Some(h) = self.tabs.get(tab_id).and_then(|t| t.view.browser()).and_then(|b| b.host())
+            && (h.zoom_level() - level).abs() > 0.01 {
+                h.set_zoom_level(level);
+            }
+    }
+
+    /// Mutes or unmutes a loaded tab. False if the tab isn't loaded.
+    fn set_muted(&mut self, tab_id: &str, muted: bool) -> bool {
+        let Some(t) = self.tabs.get_mut(tab_id) else { return false };
+        if let Some(h) = t.view.browser().and_then(|b| b.host()) {
+            h.set_audio_muted(muted as i32);
+        }
+        t.nav.muted = muted;
+        self.push_state();
+        true
+    }
+
+    /// Sets (or, with empty CSS, removes) a site's Boost and restyles its open pages now.
+    /// Returns the host it was stored under, or None if `host` isn't a site.
+    fn set_boost(&mut self, host: &str, css: &str) -> Option<String> {
+        let host = links::host_of(&format!("https://{}", host.trim().trim_start_matches("https://").trim_start_matches("http://")));
+        if host.is_empty() {
+            return None;
+        }
+        if css.trim().is_empty() {
+            self.state.boosts.remove(&host);
+        } else {
+            self.state.boosts.insert(host.clone(), css.to_string());
+        }
+        let ids: Vec<Id> = self.tabs.keys().cloned().collect();
+        for id in ids {
+            if self.state.tab(&id).is_some_and(|t| links::host_of(&t.url) == host) {
+                self.apply_boost(&id);
+            }
+        }
+        self.changed();
+        Some(host)
+    }
+
+    /// Zooms a loaded tab and remembers it for the site. False if the tab isn't loaded.
+    fn set_zoom_percent(&mut self, tab_id: &str, percent: f64) -> bool {
+        let Some(h) = self.tabs.get(tab_id).and_then(|t| t.view.browser()).and_then(|b| b.host()) else { return false };
+        // Chromium zoom levels: each step of 1 is a factor of 1.2.
+        let level = (percent.clamp(25.0, 500.0) / 100.0).ln() / 1.2f64.ln();
+        h.set_zoom_level(level);
+        let site = self.state.tab(tab_id).map(|t| links::host_of(&t.url)).unwrap_or_default();
+        if !site.is_empty() {
+            if level.abs() < 0.01 {
+                self.state.zoom.remove(&site);
+            } else {
+                self.state.zoom.insert(site, level);
+            }
+        }
+        self.changed();
+        true
+    }
+
+    /// Adds the site's Boost (the user's CSS) to the tab's page, replacing an older one.
+    fn apply_boost(&self, tab_id: &str) {
+        let Some(tab) = self.state.tab(tab_id) else { return };
+        let css = self.state.boosts.get(&links::host_of(&tab.url)).cloned().unwrap_or_default();
+        let Some(frame) = self.tabs.get(tab_id).and_then(|t| t.view.browser()).and_then(|b| b.main_frame()) else { return };
+        let js = format!(
+            "(() => {{ let s = document.getElementById('__burrow_boost'); const css = {}; \
+             if (!css) {{ if (s) s.remove(); return; }} \
+             if (!s) {{ s = document.createElement('style'); s.id = '__burrow_boost'; (document.head || document.documentElement).append(s); }} \
+             s.textContent = css; }})()",
+            js_string(&css)
+        );
+        frame.execute_java_script(Some(&cef(&js)), Some(&CefString::from(&frame.url())), 0);
     }
 
     fn apply_theme(&self) {
@@ -883,9 +1187,38 @@ impl Burrow {
             Shortcut::NewTab => self.focus_sidebar_input(true),
             Shortcut::FocusAddress => self.focus_sidebar_input(false),
             Shortcut::CloseTab => {
+                if self.peek.is_some() {
+                    return self.close_peek();
+                }
                 if let Some(id) = self.shown.clone() {
                     self.command(Command::CloseTab { tab_id: id });
                 }
+            }
+            Shortcut::Escape => {
+                if self.peek.is_some() {
+                    self.close_peek();
+                } else if self.page_fullscreen.is_some() {
+                    self.set_fullscreen(false);
+                }
+            }
+            Shortcut::Fullscreen => {
+                let on = !self.fullscreen;
+                self.set_fullscreen(on);
+            }
+            Shortcut::CopyUrl => {
+                if let Some(t) = self.state.active_tab() {
+                    crate::clipboard::set(&t.url);
+                    self.toast = Some("Link copied".into());
+                    self.push_state();
+                }
+            }
+            Shortcut::Print => self.act(Act::Print),
+            Shortcut::History => {
+                if !self.sidebar_visible {
+                    self.toggle_sidebar();
+                }
+                self.sidebar.request_focus();
+                self.run_in_sidebar("window.burrow && burrow.openHistory()");
             }
             Shortcut::Reload => self.with_active_browser(|b| b.reload()),
             Shortcut::Back => self.with_active_browser(|b| b.go_back()),
@@ -938,11 +1271,14 @@ impl Burrow {
             }
             Shortcut::DevTools => self.act(Act::DevTools { sidebar: false }),
             Shortcut::SidebarDevTools => self.act(Act::DevTools { sidebar: true }),
-            Shortcut::Zoom(dir) => self.with_active_browser(|b| {
-                if let Some(h) = b.host() {
-                    h.set_zoom_level(if dir == 0 { 0.0 } else { h.zoom_level() + 0.5 * dir as f64 });
-                }
-            }),
+            Shortcut::Zoom(dir) => {
+                self.with_active_browser(|b| {
+                    if let Some(h) = b.host() {
+                        h.set_zoom_level(if dir == 0 { 0.0 } else { h.zoom_level() + 0.5 * dir as f64 });
+                    }
+                });
+                self.remember_zoom();
+            }
         }
     }
 
@@ -962,8 +1298,15 @@ impl Burrow {
     }
 
     pub fn on_title(&mut self, browser_id: i32, title: String) {
+        if self.is_peek(browser_id) {
+            if let Some(url) = self.peek.as_ref().map(|p| p.url.clone()) {
+                self.history.set_title(&url, &title);
+            }
+            return self.on_peek_title(&title);
+        }
         let Some(id) = self.tab_of_browser(browser_id) else { return };
         if let Some(t) = self.state.tab_mut(&id) {
+            self.history.set_title(&t.url, &title);
             t.title = title;
         }
         self.apply_theme();
@@ -971,9 +1314,22 @@ impl Burrow {
     }
 
     pub fn on_address(&mut self, browser_id: i32, url: String) {
+        if self.is_peek(browser_id) {
+            self.history.record(&url, "", now_ms());
+            self.schedule_history_save();
+            return self.on_peek_address(url);
+        }
         let Some(id) = self.tab_of_browser(browser_id) else { return };
+        let mut new_site = false;
         if let Some(t) = self.state.tab_mut(&id) {
-            t.url = url;
+            new_site = links::host_of(&t.url) != links::host_of(&url);
+            t.url = url.clone();
+        }
+        let title = self.state.tab(&id).map(|t| t.title.clone()).unwrap_or_default();
+        self.history.record(&url, if new_site { "" } else { &title }, now_ms());
+        self.schedule_history_save();
+        if new_site {
+            self.apply_zoom(&id);
         }
         self.changed();
     }
@@ -981,7 +1337,10 @@ impl Burrow {
     pub fn on_favicon(&mut self, browser_id: i32, url: String) {
         let Some(id) = self.tab_of_browser(browser_id) else { return };
         if let Some(t) = self.state.tab_mut(&id) {
-            t.favicon = Some(url);
+            t.favicon = Some(url.clone());
+        }
+        if let Some(page) = self.state.tab(&id).map(|t| t.url.clone()) {
+            self.on_page_icon(&page, url);
         }
         self.changed();
     }
@@ -989,28 +1348,111 @@ impl Burrow {
     pub fn on_loading(&mut self, browser_id: i32, loading: bool, can_back: bool, can_forward: bool) {
         let Some(id) = self.tab_of_browser(browser_id) else { return };
         if let Some(t) = self.tabs.get_mut(&id) {
-            t.nav = Nav { loading, can_back, can_forward };
+            t.nav = Nav { loading, can_back, can_forward, ..t.nav };
             if !loading {
                 t.loads += 1;
             }
         }
+        if !loading {
+            let host = self.state.tab(&id).map(|t| links::host_of(&t.url)).unwrap_or_default();
+            if self.state.boosts.contains_key(&host) {
+                self.apply_boost(&id);
+            }
+            self.apply_zoom(&id);
+        }
         self.push_state();
     }
 
-    /// A link asked for a new tab (Ctrl+click, middle click, target=_blank).
-    pub fn open_tab_from(&mut self, url: String, foreground: bool) {
-        let space = self.state.active_space_mut();
-        let previous = space.active_tab.clone();
-        self.command(Command::NewTab { url });
-        if !foreground {
-            self.state.active_space_mut().active_tab = previous;
-            self.sync_view();
-            self.push_state();
+    /// A link wants a new tab (target=_blank, Ctrl+click, the page menu) or came from another
+    /// program. Air Traffic Control may send it to another space; otherwise it may open in a
+    /// Peek (D-021, D-022).
+    pub fn open_link(&mut self, from_browser: Option<i32>, url: String, kind: LinkKind) {
+        let from_peek = from_browser.is_some_and(|id| self.is_peek(id));
+        let source = from_browser.and_then(|id| self.tab_of_browser(id));
+        let source = source.or_else(|| from_peek.then(|| self.shown.clone()).flatten());
+        let kind = if from_peek && kind == LinkKind::NewTab { LinkKind::ForegroundTab } else { kind };
+        match self.state.link_destination(source.as_deref(), &url, kind) {
+            Destination::Peek => self.open_peek(url, source),
+            Destination::Tab { space_id, foreground, routed } => {
+                if routed {
+                    let name = self.state.space(&space_id).map(|s| s.name.clone()).unwrap_or_default();
+                    self.toast = Some(if foreground {
+                        format!("Opened in {name} (Air Traffic Control)")
+                    } else {
+                        format!("Sent to {name} (Air Traffic Control)")
+                    });
+                }
+                self.open_in_space(url, &space_id, foreground);
+            }
         }
     }
 
-    /// `window.open` popups become tabs, keeping their opener (needed for OAuth sign-in flows).
-    pub fn adopt_popup(&mut self, view: BrowserView) {
+    /// Opens a Today tab at the top of a space. A background tab loads right away, hidden.
+    fn open_in_space(&mut self, url: String, space_id: &str, foreground: bool) {
+        let to = Location { space_id: Some(space_id.to_string()), section: Section::Today, parent: None, index: Some(0) };
+        match self.state.open_tab(url, Some(to), foreground) {
+            Ok((id, effects)) => {
+                for e in effects {
+                    self.effect(e);
+                }
+                if foreground && self.state.active_space != space_id {
+                    self.apply_theme();
+                }
+                self.ensure_live(&id);
+                self.sync_view();
+                self.changed();
+            }
+            Err(e) => eprintln!("Burrow: {e}"),
+        }
+    }
+
+    /// "Open Link in Peek" from the page menu.
+    pub fn peek_link(&mut self, from_browser: Option<i32>, url: String) {
+        let source = from_browser.and_then(|id| self.tab_of_browser(id));
+        self.open_peek(url, source.or_else(|| self.shown.clone()));
+    }
+
+    /// A tab in the active space, for links that must not peek (e.g. a Peek that is closing).
+    fn open_link_as_tab(&mut self, url: String, background: bool) {
+        let space_id = self.state.active_space.clone();
+        self.open_in_space(url, &space_id, !background);
+    }
+
+    /// A link from another program (Burrow is the default browser): its own tab, in the space
+    /// Air Traffic Control picks, and the window comes to the front.
+    pub fn open_external(&mut self, url: String) {
+        self.open_link(None, url, LinkKind::External);
+        if let Some(w) = &self.window {
+            if w.is_minimized() != 0 {
+                w.restore();
+            }
+            w.activate();
+        }
+    }
+
+    /// Whether a link click in a pinned tab should open in a Peek instead (CEF asks before the
+    /// navigation starts, so this answers synchronously).
+    pub fn intercept_navigation(&mut self, browser_id: i32, from_url: &str, to_url: &str) -> bool {
+        if self.is_peek(browser_id) {
+            return false;
+        }
+        let Some(id) = self.tab_of_browser(browser_id) else { return false };
+        if !self.state.peeks_navigation(&id, from_url, to_url) || links::looks_like_sign_in(to_url) {
+            return false;
+        }
+        let url = to_url.to_string();
+        later(move |b| b.open_peek(url, Some(id)));
+        true
+    }
+
+    /// `window.open` popups keep their opener (needed for sign-in flows). They show as a Peek,
+    /// or become tabs when Peek is off or the popup came from a Peek.
+    pub fn adopt_popup(&mut self, opener: Option<i32>, view: BrowserView) {
+        let from_peek = opener.is_some_and(|id| self.is_peek(id));
+        let source = opener.and_then(|id| self.tab_of_browser(id));
+        if self.state.settings.peek_new_tabs && !from_peek && self.adopt_popup_as_peek(view.clone(), source) {
+            return;
+        }
         self.state
             .apply(Command::NewTab { url: "about:blank".into() })
             .expect("new tab never fails");
@@ -1022,6 +1464,13 @@ impl Burrow {
 
     /// A browser went away on its own (e.g. the page called `window.close()`).
     pub fn on_browser_closed(&mut self, browser_id: i32) {
+        if let Some(i) = self.dying_peeks.iter().position(|p| *p == browser_id) {
+            self.dying_peeks.remove(i);
+            return self.maybe_finish_close();
+        }
+        if self.is_peek(browser_id) {
+            return self.on_peek_closed();
+        }
         let Some(id) = self.tab_of_browser(browser_id) else { return };
         self.tabs.remove(&id);
         if self.closing {
@@ -1032,6 +1481,27 @@ impl Burrow {
         }
         // Same as the user closing it: Today tabs go away; pinned ones unload and return home.
         self.command(Command::CloseTab { tab_id: id });
+    }
+
+    /// A page asked to close (`window.close()`, e.g. a finished sign-in popup).
+    pub fn on_close_requested(&mut self, browser_id: i32) {
+        if self.is_peek(browser_id) {
+            return self.close_peek();
+        }
+        if let Some(id) = self.tab_of_browser(browser_id) {
+            self.command(Command::CloseTab { tab_id: id });
+        }
+    }
+
+    /// In split view, clicking into the other half makes it the active tab.
+    pub fn on_tab_focused(&mut self, browser_id: i32) {
+        let Some(id) = self.tab_of_browser(browser_id) else { return };
+        if self.visible.len() > 1 && self.visible.contains(&id) && self.shown.as_deref() != Some(&*id) {
+            self.state.active_space_mut().active_tab = Some(id.clone());
+            self.shown = Some(id);
+            self.apply_theme();
+            self.changed();
+        }
     }
 
     pub fn on_download(&mut self, d: (u32, String, String, i32, bool, bool)) {
@@ -1095,7 +1565,7 @@ impl Burrow {
 
     pub fn search_in_new_tab(&mut self, text: &str) {
         let url = self.state.settings.search_url.replace("{}", &burrow_core::omnibox::encode_query(text.trim()));
-        self.open_tab_from(url, true);
+        self.open_link_as_tab(url, false);
     }
 
     // ---- Sidebar rendering ------------------------------------------------------------------
@@ -1123,6 +1593,14 @@ impl Burrow {
                 sidebar_collapsed: bool,
                 peeking: bool,
                 agent_active: bool,
+                icons: icons::IconsView<'a>,
+                /// The tabs in the content area (two in split view).
+                visible: &'a [Id],
+                /// The shown tab's zoom in percent.
+                zoom: i32,
+                peek: Option<&'a str>,
+                fullscreen: bool,
+                windows: bool,
             }
             let view = View {
                 state: &b.state,
@@ -1147,6 +1625,18 @@ impl Burrow {
                 sidebar_collapsed: !b.sidebar_shown(),
                 peeking: b.peeking,
                 agent_active: b.agent_active,
+                icons: b.icons.view(),
+                visible: &b.visible,
+                zoom: b
+                    .shown
+                    .as_ref()
+                    .and_then(|id| b.tabs.get(id))
+                    .and_then(|t| t.view.browser())
+                    .and_then(|br| br.host())
+                    .map_or(100, |h| (1.2f64.powf(h.zoom_level()) * 100.0).round() as i32),
+                peek: b.peek.as_ref().map(|p| p.url.as_str()),
+                fullscreen: b.fullscreen,
+                windows: cfg!(target_os = "windows"),
             };
             match serde_json::to_string(&view) {
                 Ok(json) => b.run_in_sidebar(&format!("window.burrow && burrow.render({json})")),
@@ -1180,6 +1670,12 @@ pub enum Shortcut {
     Zoom(i32),
     ReopenClosed,
     Find,
+    /// Escape while a Peek or a fullscreen page is open.
+    Escape,
+    Fullscreen,
+    CopyUrl,
+    Print,
+    History,
 }
 
 fn open_path(path: &str) {
