@@ -160,7 +160,12 @@ pub(super) struct Install {
 impl Burrow {
     pub(super) fn extensions_view(&self) -> ExtensionsView<'_> {
         ExtensionsView {
-            badges: self.ext_badges.keys().filter_map(|id| Some((id.as_str(), self.badge_for(id)?))).collect(),
+            badges: self
+                .ext_badges
+                .keys()
+                .filter(|id| self.state.extension(id).is_some_and(|e| e.enabled && is_running(e)))
+                .filter_map(|id| Some((id.as_str(), self.badge_for(id)?)))
+                .collect(),
             running: self.state.extensions.iter().filter(|e| is_running(e)).map(|e| e.id.as_str()).collect(),
             restart_needed: restart_needed(&self.state),
             installing: self.ext_installs.values().map(|i| i.label.as_str()).collect(),
@@ -373,6 +378,7 @@ impl Burrow {
             self.close_extension_popup();
         }
         let e = self.state.remove_extension(id)?;
+        self.ext_badges.remove(id);
         self.toast = Some(format!("Removed {}.", e.name));
         self.changed();
         Some(e)
