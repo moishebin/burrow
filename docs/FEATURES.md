@@ -47,8 +47,8 @@ Priority: **P0** = needed before the owner can switch from Arc · P1 = soon afte
 | Peek / little browser for links from pinned tabs | ⬜ | |
 | Split view | ⬜ | |
 | Password saving / autofill | ⬜ | Alloy has no password UI (D-010). Likely a built-in manager or an extension later. |
-| Default-browser registration on Windows | ⬜ | Needs an installer |
-| Installer + auto-update | 🟡 | `scripts/install-win.sh`: per-user install + Start menu shortcut. Release archives for Windows and Linux (`scripts/package.sh`, D-020). The Windows zip runs on a clean PC (no VC++ runtime needed) and was verified extracted and run (D-026). Not code-signed; no auto-update yet. |
+| Default-browser registration on Windows | ⬜ | The installer exists now (D-027); it doesn't register Burrow as a browser yet |
+| Installer + auto-update | 🟡 | Windows setup .exe: per-user, Start menu, *Settings → Apps* uninstall, updates in place (D-027). Verified install/upgrade/uninstall on Windows. Zip and Linux archive too (D-020); the zip runs on a clean PC (D-026). Not code-signed yet (ready via `BURROW_SIGN`); no auto-update yet. |
 | Launching Burrow again focuses the running window | ✅ | D-026. Verified on Windows: restores a minimized window, no second window. |
 | Exe file icon (Explorer) | ✅ | `build.rs` + embed-resource (llvm-rc) |
 | Zoom indicator, per-site zoom memory | 🟡 | Ctrl+=/−/0 work; no indicator |
