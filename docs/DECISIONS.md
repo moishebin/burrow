@@ -161,3 +161,15 @@ Because of Alloy style (D-010), Burrow builds its own UI:
 **Decision.** At the owner's request, agents can manage tabs, folders and spaces at any time; there is no switch for that. Page tools (`burrow_core::agent::PAGE_TOOLS`: `read_page`, `screenshot`, `click`, `type_text`, `press_key`, `wait_for`, `eval_js`) are on by default, and **+ → Block Agents from Pages** turns them off (`settings.agent_page_access`). A blocked call tells the agent that tab and space tools still work.
 
 **Consequences.** With pages blocked, an agent can still open tabs and navigate them (it can't see the result). `open_tab` and `navigate` still report the page title, which is what the sidebar shows anyway.
+
+## D-020 · First release (0.0.1): Linux and Windows archives built from WSL; no macOS yet (2026-10-22)
+
+**Decision.** `scripts/package.sh` builds release archives into `dist/`. Each has a `Burrow/` folder with the executable, the CEF runtime, `ui/`, the license, and CEF/Chromium's credits:
+- `burrow-<version>-windows-x64.zip`: the same files `install-win.sh` installs. It isn't code-signed, so Windows SmartScreen warns on first run.
+- `burrow-<version>-linux-x64.tar.gz`: `libcef.so` is stripped (CEF ships it with ~1.4 GB of debug symbols; stripped, the archive is ~150 MB).
+
+Releases are GitHub releases tagged `v<version>`, with the archives attached. The workspace version starts at 0.0.1.
+
+**No macOS build.** It can't be made from WSL: it needs the macOS SDK, an `.app` bundle with CEF's framework and helper apps, code signing, and changes in `main.rs` (CEF on macOS loads its framework at runtime). It needs a Mac or a macOS CI runner, and someone to test it.
+
+**Verified.** The Linux archive was extracted and run on Xvfb (sidebar, a page, and agent tools). The Windows archive has the same runtime files as the working per-user install. The packaged Windows build wasn't launched, because the owner's own Burrow was running.

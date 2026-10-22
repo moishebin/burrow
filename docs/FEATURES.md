@@ -48,7 +48,7 @@ Priority: **P0** = needed before the owner can switch from Arc · P1 = soon afte
 | Split view | ⬜ | |
 | Password saving / autofill | ⬜ | Alloy has no password UI (D-010). Likely a built-in manager or an extension later. |
 | Default-browser registration on Windows | ⬜ | Needs an installer |
-| Installer + auto-update | 🟡 | `scripts/install-win.sh`: per-user install + Start menu shortcut. No auto-update yet. |
+| Installer + auto-update | 🟡 | `scripts/install-win.sh`: per-user install + Start menu shortcut. Release archives for Windows and Linux (`scripts/package.sh`, D-020). No auto-update yet. |
 | Exe file icon (Explorer) | ✅ | `build.rs` + embed-resource (llvm-rc) |
 | Zoom indicator, per-site zoom memory | 🟡 | Ctrl+=/−/0 work; no indicator |
 | History page | ⬜ | |
@@ -61,6 +61,6 @@ Priority: **P0** = needed before the owner can switch from Arc · P1 = soon afte
 |---|---|---|
 | Chrome extensions (password managers first) | 💤 | Owner said "not now" (2026-10-22). Alloy has limited extension support (D-010). |
 | Built-in ad blocker | 💤 | |
-| macOS / Linux packages | 💤 | Code is cross-platform; not packaged |
+| macOS / Linux packages | 🟡 | Linux `.tar.gz` since 0.0.1 (D-020). macOS needs a Mac to build (app bundle, signing). |
 | Sync between machines | 💤 | |
 | Boosts / custom CSS | 💤 | |

@@ -18,6 +18,14 @@ An open-source browser in the spirit of Arc, built with Rust and Chromium (via C
 
 Status: early, but usable day to day on Windows. See [docs/FEATURES.md](docs/FEATURES.md) for what works and what doesn't yet, and [docs/DECISIONS.md](docs/DECISIONS.md) for the reasoning behind each choice.
 
+## Download
+
+Get the latest build from [Releases](https://github.com/moishebin/burrow/releases):
+
+- **Windows (x64):** unzip `burrow-…-windows-x64.zip` anywhere and run `Burrow\burrow.exe`. It isn't signed yet, so Windows SmartScreen may warn the first time ("More info → Run anyway").
+- **Linux (x64):** `tar xzf burrow-…-linux-x64.tar.gz` and run `Burrow/burrow`. It needs the usual desktop libraries Chrome needs (GTK 3, NSS).
+- **macOS:** not built yet.
+
 ## Building
 
 Burrow is developed in WSL/Linux and cross-compiled for Windows.
@@ -29,6 +37,7 @@ cargo install cargo-xwin
 scripts/build-win.sh            # builds and copies to %LOCALAPPDATA%\Burrow-dev\app
 scripts/run-win.sh              # starts it with a throwaway profile and DevTools on :9222
 scripts/run-win.sh --real       # starts it with your real profile (%LOCALAPPDATA%\Burrow)
+scripts/package.sh              # release archives for Linux and Windows in dist/
 ```
 
 The first build downloads CEF (~400 MB) to `~/.local/share/cef`.
