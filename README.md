@@ -26,6 +26,11 @@ Get the latest build from [Releases](https://github.com/moishebin/burrow/release
 - **Linux (x64):** `tar xzf burrow-…-linux-x64.tar.gz` and run `Burrow/burrow`. It needs the usual desktop libraries Chrome needs (GTK 3, NSS).
 - **macOS:** not built yet.
 
+Keep the `Burrow` folder together: `burrow.exe` needs the Chromium files next to it. Nothing else needs to be installed.
+Your spaces, tabs, history and logins are saved in `%LOCALAPPDATA%\Burrow` (Windows) or `~/.local/share/Burrow` (Linux), outside the app folder, so you can replace the folder with a newer version and keep everything.
+To uninstall, delete the `Burrow` folder, and that data folder if you don't want to keep your data.
+`SHA256SUMS.txt` on the release page lists each archive's checksum.
+
 ## Building
 
 Burrow is developed in WSL/Linux and cross-compiled for Windows.
@@ -65,9 +70,9 @@ AI agents can drive Burrow: open, close, move and pin tabs, set up spaces and fo
 Add Burrow as an MCP server to your agent. For Claude Code:
 
 ```sh
-claude mcp add burrow -- "C:\Users\<you>\AppData\Local\Programs\Burrow\burrow.exe" --mcp
+claude mcp add burrow -- "C:\<where you unzipped it>\Burrow\burrow.exe" --mcp
 # from WSL:
-claude mcp add burrow -- /mnt/c/Users/<you>/AppData/Local/Programs/Burrow/burrow.exe --mcp
+claude mcp add burrow -- "/mnt/c/<where you unzipped it>/Burrow/burrow.exe" --mcp
 ```
 
 Or call tools from a shell (Burrow starts if it isn't running):

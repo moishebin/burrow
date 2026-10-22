@@ -55,3 +55,6 @@ for t in "${targets[@]}"; do
   echo "Packaged dist/$name ($(du -h "$dist/$name" | cut -f1))"
 done
 rm -rf "$dist/stage"
+# Checksums for every archive of this version, for the release page.
+(cd "$dist" && sha256sum burrow-"$version"-* > SHA256SUMS.txt)
+echo "Checksums in dist/SHA256SUMS.txt"

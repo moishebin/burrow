@@ -173,3 +173,20 @@ Releases are GitHub releases tagged `v<version>`, with the archives attached. Th
 **No macOS build.** It can't be made from WSL: it needs the macOS SDK, an `.app` bundle with CEF's framework and helper apps, code signing, and changes in `main.rs` (CEF on macOS loads its framework at runtime). It needs a Mac or a macOS CI runner, and someone to test it.
 
 **Verified.** The Linux archive was extracted and run on Xvfb (sidebar, a page, and agent tools). The Windows archive has the same runtime files as the working per-user install. The packaged Windows build wasn't launched, because the owner's own Burrow was running.
+
+## D-026 · Windows package runs on a clean PC; a second launch focuses the window (2026-10-22)
+
+**Context.** The 0.0.1 Windows archive had never been launched. Checking it as a downloaded package found two problems:
+1. `burrow.exe` imported `VCRUNTIME140.dll` (the Visual C++ Redistributable), which the archive doesn't include. Most PCs have it from other apps, but a clean Windows install may not, and Burrow wouldn't start there.
+2. Starting Burrow while it was already running (a second click on a shortcut) made CEF open a separate plain Chromium window ("New Tab - Chromium", with Google's new-tab page). That breaks the one-window rule.
+
+**Decision.**
+- Link the C runtime statically on Windows (`.cargo/config.toml`: `+crt-static`). `burrow.exe` now imports only Windows system DLLs and `libcef.dll`. None of the bundled CEF DLLs need the VC runtime. CEF's wrapper library was already built with the static runtime (`/MT`, by cef-dll-sys), so this also stops mixing two runtimes in one exe.
+- Implement `on_already_running_app_relaunch`: return 1 and bring the existing window to the front (restoring it if minimized). The second process exits.
+- Embed Windows version info in `burrow.exe` (product name "Burrow" and the Cargo version), so Explorer's file properties, Task Manager and SmartScreen show "Burrow". `build.rs` fills the version into `resources/burrow.rc`.
+- `package.sh` writes `dist/SHA256SUMS.txt` for the release page.
+- The README says to keep the `Burrow` folder together, where the data lives (outside the app folder, so updating means replacing the folder), and how to uninstall.
+
+**Verified.** On Windows: the archive was extracted with `Expand-Archive` into a new folder and run with a throwaway data folder, alongside the owner's installed Burrow, which was left running. Checked: the sidebar loaded from the app folder; a real HTTPS page loaded; the agent CLI could list, read and screenshot a tab; a graceful close saved `state.json` and the tab came back after a restart; and a second launch exited and restored the minimized window, with no extra window. Logs and caches go to the data folder, so the app folder can be read-only. The Linux archive was checked the same way on its own Xvfb display: a page loaded, the agent CLI worked, and a second launch exited with no extra window.
+
+**Still open.** The exe isn't code-signed, so SmartScreen warns on first run (needs a certificate). There's no installer, Start menu entry or auto-update for zip users; `scripts/install-win.sh` covers the owner's machine.

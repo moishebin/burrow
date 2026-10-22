@@ -29,5 +29,16 @@ wrap_browser_process_handler! {
         fn on_context_initialized(&self) {
             browser::start();
         }
+
+        // Burrow started again (e.g. from a shortcut) while running. Returning 0 makes CEF open a
+        // plain Chromium window; Burrow keeps one window, so bring it forward instead (D-026).
+        fn on_already_running_app_relaunch(
+            &self,
+            _command_line: Option<&mut CommandLine>,
+            _current_directory: Option<&CefString>,
+        ) -> ::std::os::raw::c_int {
+            browser::later(|b| b.bring_to_front());
+            1
+        }
     }
 }
