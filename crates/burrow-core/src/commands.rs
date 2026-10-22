@@ -19,6 +19,10 @@ pub enum Command {
     CloseTab {
         tab_id: Id,
     },
+    /// Removes a tab for good, wherever it is (pinned tabs and favorites included).
+    DeleteTab {
+        tab_id: Id,
+    },
     /// Navigate a pinned tab or favorite back to its home URL.
     ResetTab {
         tab_id: Id,
@@ -167,6 +171,19 @@ impl State {
                 Ok(vec![])
             }
             Command::CloseTab { tab_id } => self.close_tab(&tab_id),
+            Command::DeleteTab { tab_id } => {
+                let space = self.space_of(&tab_id).filter(|s| s.tab(&tab_id).is_some());
+                match space.and_then(|s| s.section_of(&tab_id)) {
+                    None => Err(CommandError::NoTab(tab_id)),
+                    Some(Section::Today) => self.close_tab(&tab_id),
+                    Some(_) => {
+                        // Unpinning first makes the close remove it instead of sending it home.
+                        let to = Location { space_id: None, section: Section::Today, parent: None, index: Some(0) };
+                        self.move_node(&tab_id, to)?;
+                        self.close_tab(&tab_id)
+                    }
+                }
+            }
             Command::ResetTab { tab_id } => {
                 let tab = self
                     .tab_mut(&tab_id)
@@ -351,6 +368,34 @@ impl State {
                 self.apply(Command::NewTab { url: entry.url })
             }
         }
+    }
+
+    /// Opens a tab at `to` (default: top of Today in the active space) and returns its id.
+    /// Unlike `NewTab`, the tab only becomes the one shown when `focus` is set.
+    pub fn open_tab(&mut self, url: String, to: Option<Location>, focus: bool) -> Result<(Id, Vec<Effect>), CommandError> {
+        let space_id = to.as_ref().and_then(|l| l.space_id.clone()).unwrap_or_else(|| self.active_space.clone());
+        let mut tab = Tab::new(url);
+        tab.last_active_ms = now_ms();
+        let id = tab.id.clone();
+        self.space_mut(&space_id)
+            .ok_or_else(|| CommandError::NoSpace(space_id.clone()))?
+            .today
+            .insert(0, tab);
+        let mut effects = vec![];
+        if let Some(to) = to.filter(|l| l.section != Section::Today || l.index.unwrap_or(0) != 0) {
+            match self.move_node(&id, Location { space_id: Some(space_id.clone()), ..to }) {
+                Ok(fx) => effects = fx,
+                Err(e) => {
+                    let space = self.space_mut(&space_id).unwrap();
+                    space.today.retain(|t| t.id != id);
+                    return Err(e);
+                }
+            }
+        }
+        if focus {
+            self.apply(Command::SelectTab { tab_id: id.clone() })?;
+        }
+        Ok((id, effects))
     }
 
     /// Archives Today tabs that haven't been used for `settings.archive_after_hours`, except

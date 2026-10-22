@@ -11,6 +11,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{clients, consts, paths, task, views};
 
+mod tools;
+
 thread_local! {
     static BURROW: RefCell<Option<Burrow>> = const { RefCell::new(None) };
 }
@@ -40,6 +42,12 @@ struct LiveTab {
     view: BrowserView,
     browser_id: Option<i32>,
     nav: Nav,
+    /// How many page loads have finished; agent tools wait for it to go up (D-018).
+    loads: u32,
+    /// Keeps the agent tools' DevTools observer attached while the browser lives.
+    devtools: Option<Registration>,
+    /// An agent gave the hidden page a viewport size; undone when the tab is shown.
+    emulated: bool,
 }
 
 #[derive(Default, Clone, Copy, Serialize)]
@@ -190,6 +198,12 @@ pub struct Burrow {
     arc_available: bool,
     /// The sidebar's drag areas, in sidebar coordinates.
     drag_regions: Vec<(Rect, bool)>,
+    /// Agent tools waiting for a DevTools answer, by message id (D-018).
+    devtools_pending: HashMap<i32, tools::Done>,
+    next_devtools_id: i32,
+    /// An agent called a tool in the last few seconds; the sidebar shows it.
+    agent_active: bool,
+    agent_generation: u64,
 }
 
 /// Messages from the sidebar that aren't model commands.
@@ -223,6 +237,7 @@ enum Act {
     WindowMaximize,
     WindowClose,
     SetSystemTitleBar { on: bool },
+    SetAgentPageAccess { on: bool },
 }
 
 /// Starts Burrow: loads the state and creates the main window. Called once, on the UI thread.
@@ -274,8 +289,13 @@ pub fn start() {
             find: FindState::default(),
             arc_available: paths::arc_sidebar_file().is_some(),
             drag_regions: Vec::new(),
+            devtools_pending: HashMap::new(),
+            next_devtools_id: 1,
+            agent_active: false,
+            agent_generation: 0,
         })
     });
+    crate::agent::start_server();
 
     let mut window_delegate = views::MainWindowDelegate::new();
     window_create_top_level(Some(&mut window_delegate));
@@ -526,6 +546,15 @@ impl Burrow {
                 self.toast = Some("Restart Burrow to switch the title bar.".into());
                 self.changed();
             }
+            Act::SetAgentPageAccess { on } => {
+                self.state.settings.agent_page_access = on;
+                self.toast = Some(if on {
+                    "Agents can read and use pages again."
+                } else {
+                    "Agents can no longer read or use pages. They can still manage tabs and spaces."
+                }.into());
+                self.changed();
+            }
             Act::SetArchiveHours { hours } => {
                 self.state.settings.archive_after_hours = hours;
                 self.changed();
@@ -623,6 +652,9 @@ impl Burrow {
             self.shown = want;
             self.content.layout();
             self.focus_content();
+            if let Some(id) = self.shown.clone() {
+                self.end_emulation(&id);
+            }
         } else if self.shown.is_none() {
             // E.g. the last tab was just closed: keep keyboard focus somewhere that has shortcuts.
             self.sidebar.request_focus();
@@ -671,6 +703,9 @@ impl Burrow {
                 view,
                 browser_id: None,
                 nav: Nav::default(),
+                loads: 0,
+                devtools: None,
+                emulated: false,
             },
         );
     }
@@ -955,6 +990,9 @@ impl Burrow {
         let Some(id) = self.tab_of_browser(browser_id) else { return };
         if let Some(t) = self.tabs.get_mut(&id) {
             t.nav = Nav { loading, can_back, can_forward };
+            if !loading {
+                t.loads += 1;
+            }
         }
         self.push_state();
     }
@@ -1084,6 +1122,7 @@ impl Burrow {
                 maximized: bool,
                 sidebar_collapsed: bool,
                 peeking: bool,
+                agent_active: bool,
             }
             let view = View {
                 state: &b.state,
@@ -1107,6 +1146,7 @@ impl Burrow {
                 maximized: b.window.as_ref().is_some_and(|w| w.is_maximized() != 0),
                 sidebar_collapsed: !b.sidebar_shown(),
                 peeking: b.peeking,
+                agent_active: b.agent_active,
             };
             match serde_json::to_string(&view) {
                 Ok(json) => b.run_in_sidebar(&format!("window.burrow && burrow.render({json})")),

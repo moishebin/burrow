@@ -573,3 +573,20 @@ wrap_request_context_handler! {
         }
     }
 }
+
+// Answers to the DevTools calls the agent tools send to a tab (D-018).
+wrap_dev_tools_message_observer! {
+    pub struct AgentDevTools {}
+    impl DevToolsMessageObserver {
+        fn on_dev_tools_method_result(
+            &self,
+            _browser: Option<&mut Browser>,
+            message_id: ::std::os::raw::c_int,
+            success: ::std::os::raw::c_int,
+            result: Option<&[u8]>,
+        ) {
+            let json = String::from_utf8_lossy(result.unwrap_or_default()).into_owned();
+            browser::later(move |b| b.on_devtools_result(message_id, success != 0, &json));
+        }
+    }
+}

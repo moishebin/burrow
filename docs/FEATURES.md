@@ -53,6 +53,7 @@ Priority: **P0** = needed before the owner can switch from Arc · P1 = soon afte
 | Zoom indicator, per-site zoom memory | 🟡 | Ctrl+=/−/0 work; no indicator |
 | History page | ⬜ | |
 | Notifications shown as Windows toasts | ⬜ | Permission prompt exists; Alloy may not deliver toasts |
+| **Agent control** (MCP server, CLI, local API): tabs, spaces, folders, read/screenshot/click/type in any tab | ✅ | D-018. Verified on Linux/Xvfb: background tabs read, screenshotted, clicked and typed into while the user's tab stays shown; MCP over stdio; auth/Origin/Host checks. Page tools can be switched off; tab and space tools always work (D-019). Windows exe verified as a client from WSL; the server side on Windows is not yet checked by hand. |
 
 ## P2
 

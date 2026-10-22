@@ -9,6 +9,7 @@ Open-source Arc-style browser: Rust + CEF (cef-rs), Windows first, developed in 
 - Model logic goes in `crates/burrow-core` with unit tests. The app crate only translates CEF events into commands and effects.
 - CEF callbacks must not touch the controller directly: use `browser::later(...)` (D-009). The only synchronous `browser::with` calls are ones where CEF needs an answer now (`can_close`, `is_frameless`, popups, permissions).
 - Text from web pages goes into the sidebar with `textContent`, never `innerHTML`.
+- Agent tools (D-018): model-only tools go in `burrow_core::agent`; page tools in `crates/burrow/src/browser/tools.rs`. Agents must not disturb the user: open in the background unless asked to focus.
 
 ## Dev loop (D-012)
 
@@ -20,7 +21,7 @@ powershell.exe -File 'C:\Users\<user>\AppData\Local\Burrow-dev\tools\cdp.ps1' -L
 powershell.exe -File '…\cdp.ps1' -Match sidebar -Shot C:\…\sb.png -Eval "JSON.stringify(view.state)"
 ```
 
-`build-win.sh` doesn't copy `scripts/cdp.ps1`/`postkey.ps1`; copy them to `…\Burrow-dev\tools\` when they change. The DevTools port is only reachable from Windows, so use `powershell.exe`, not curl from WSL.
+`build-win.sh` and `run-win.sh` kill every running `burrow.exe`, including the owner's installed one; check `Get-Process burrow` first. `build-win.sh` doesn't copy `scripts/cdp.ps1`/`postkey.ps1`; copy them to `…\Burrow-dev\tools\` when they change. The DevTools port is only reachable from Windows, so use `powershell.exe`, not curl from WSL.
 
 Real mouse/keyboard testing (Linux build on a virtual display, D-015):
 
@@ -30,6 +31,7 @@ scripts/run-xvfb.sh                                 # Burrow on DISPLAY=:99, Dev
 DISPLAY=:99 xdotool mousemove 130 69 click 1        # real input
 python3 scripts/xshot.py /tmp/shot.png              # screenshot of :99
 node scripts/cdp.mjs sidebar eval "view.state.spaces.length"
+target/debug/burrow --agent list_tabs --data-dir target/xvfb-data   # agent tools (D-018)
 scripts/run-xvfb.sh stop
 ```
 

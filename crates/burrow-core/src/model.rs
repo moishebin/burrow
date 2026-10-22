@@ -60,6 +60,14 @@ pub struct Settings {
     /// Use the Windows title bar instead of Burrow's frameless, Arc-style window. Needs a restart.
     #[serde(default)]
     pub system_title_bar: bool,
+    /// AI agents may read and use pages (screenshots, clicks, typing, scripts). Managing tabs and
+    /// spaces is always allowed (D-019).
+    #[serde(default = "yes")]
+    pub agent_page_access: bool,
+}
+
+fn yes() -> bool {
+    true
 }
 
 fn default_archive_hours() -> u32 {
@@ -72,6 +80,7 @@ impl Default for Settings {
             search_url: "https://www.google.com/search?q={}".into(),
             archive_after_hours: default_archive_hours(),
             system_title_bar: false,
+            agent_page_access: true,
         }
     }
 }

@@ -49,6 +49,30 @@ cargo test -p burrow-core
 | `scripts/` | Build, run and DevTools helpers. |
 | `docs/` | Decisions and the feature tracker. |
 
+## Agents
+
+AI agents can drive Burrow: open, close, move and pin tabs, set up spaces and folders, and read, screenshot, click and type in **any** tab, even one you aren't looking at. They work in the background, so your own tab stays put. A pulsing **Agent** badge in the sidebar shows when one is working, and **+ → Block Agents from Pages** stops agents from reading or using pages (they can still manage tabs and spaces).
+
+Add Burrow as an MCP server to your agent. For Claude Code:
+
+```sh
+claude mcp add burrow -- "C:\Users\<you>\AppData\Local\Programs\Burrow\burrow.exe" --mcp
+# from WSL:
+claude mcp add burrow -- /mnt/c/Users/<you>/AppData/Local/Programs/Burrow/burrow.exe --mcp
+```
+
+Or call tools from a shell (Burrow starts if it isn't running):
+
+```sh
+burrow --agent tools                                   # list the tools and their arguments
+burrow --agent open_tab '{"url":"example.com"}'        # opens in the background, returns the tab
+burrow --agent read_page '{"tab_id":"…","format":"elements"}'
+burrow --agent screenshot '{"tab_id":"…"}' --out page.png
+```
+
+Tools: `list_spaces`, `get_space`, `list_tabs`, `open_tab`, `close_tab`, `focus_tab`, `navigate`, `move_tab`, `rename_tab`, `create_folder`, `update_folder`, `create_space`, `update_space`, `delete_space`, `switch_space`, `read_page`, `screenshot`, `click`, `type_text`, `press_key`, `wait_for`, `eval_js`.
+Under the hood it's a local HTTP API (`POST http://127.0.0.1:<port>/v1/<tool>`, port and token in `agent.json` in Burrow's data folder). See [D-018](docs/DECISIONS.md).
+
 ## Keyboard
 
 | Keys | Action |

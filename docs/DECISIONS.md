@@ -135,3 +135,29 @@ Because of Alloy style (D-010), Burrow builds its own UI:
 **Decision.** Keep developing on standard CEF. When a Google-free release is wanted, build our own CEF package from Chromium with ungoogled-chromium's patches, at the **same Chromium version** cef-rs targets (currently 154), and build Burrow with `CEF_PATH` pointing at it. Burrow's code doesn't change. We can ship two flavors from one codebase ("Burrow" and "Burrow Ungoogled"), or switch over completely.
 
 **Cost.** About 100 GB of disk and several hours of compiling per Chromium version, on a strong machine or a self-hosted/large CI runner (GitHub's free runners can't build Chromium). Before then, measure what standard Burrow actually sends to Google and switch off what we can with settings (option 1, still to do).
+
+## D-018 · Agent interface: a local API, an MCP server and a CLI, all in `burrow.exe` (2026-10-22)
+
+**Context.** The owner wants AI agents to drive Burrow: open and close tabs, set up spaces and folders, look at any tab, and use pages.
+
+**Decision.**
+- Burrow runs a small HTTP API on `127.0.0.1` at a random port, and writes `{port, token, pid}` to `<data>/agent.json` (owner-only on Unix; `%LOCALAPPDATA%` is already private on Windows). `POST /v1/<tool>` with JSON arguments; `GET /v1/tools` lists the tools.
+- The same exe is the client. `burrow --mcp` is an MCP server on stdin/stdout, so any MCP agent (Claude Code, etc.) can use Burrow with one line of config. `burrow --agent <tool> '<json>'` calls a tool from a shell. If Burrow isn't running, both start it first.
+- The tool list and every tool that only changes the model (spaces, folders, moving, closing) live in `burrow_core::agent` and are unit-tested. The app runs the tools that need a page: `open_tab`, `navigate`, `read_page`, `screenshot`, `click`, `type_text`, `press_key`, `wait_for` and `eval_js`.
+- Page tools speak the DevTools protocol to each tab's own browser through CEF (`send_dev_tools_message` + an observer), not through `--remote-debugging-port`. No open debugging port is needed, and every tab can be reached, whichever is shown.
+- **Agents work in the background.** `open_tab` doesn't switch tabs unless `focus` is set, and creating a space doesn't switch to it. A hidden tab's view has no size and doesn't paint, which made screenshots time out. Burrow gives the hidden page the content area's size with `Emulation.setDeviceMetricsOverride`, which makes it lay out and render as if shown, and clears the override when the tab is shown. A first attempt rendered the tab *behind* the shown one; it failed when no tab is shown, because a browser view's layer always draws over ordinary painted views, so nothing can cover it.
+- **Safety.** Every request needs the token. Requests with an `Origin` header (from web pages) or a foreign `Host` (DNS rebinding) are refused. The sidebar shows a pulsing "Agent" badge while an agent is working. "Turn Off Agent Access" in the + menu turns the whole thing off (`settings.agent_access`, on by default). `read_page format=elements` never includes password field values. Keys sent by agents go straight to the page, so they never trigger Burrow's own shortcuts.
+
+**Why.** One exe means no Node, Python or extra install for the owner. MCP over stdio works from WSL calling the Windows exe, because WSL interop passes pipes, and the Windows release build (a GUI program) still reads and writes inherited pipes; this was checked from WSL. A plain HTTP API keeps it usable from any language or curl.
+
+**Consequences.** Anything that runs as the owner can read `agent.json` and control Burrow, including the logged-in sites in every space. That is the same trust level as reading the profiles' cookie files, which such a program can already do. The owner can turn agent access off. Tools act on a tab's main frame only.
+
+## D-019 · Agents always manage tabs and spaces; page access can be switched off (2026-10-22)
+
+**Supersedes** the on/off switch in D-018, which turned off all agent access.
+
+**Context.** The owner asked whether D-018 is a security risk. The API itself is closed to web pages and other users. The real risk is prompt injection: an agent reading a hostile page could act with the owner's logins. That needs page access (reading, screenshots, clicks, typing, scripts), not tab management.
+
+**Decision.** At the owner's request, agents can manage tabs, folders and spaces at any time; there is no switch for that. Page tools (`burrow_core::agent::PAGE_TOOLS`: `read_page`, `screenshot`, `click`, `type_text`, `press_key`, `wait_for`, `eval_js`) are on by default, and **+ → Block Agents from Pages** turns them off (`settings.agent_page_access`). A blocked call tells the agent that tab and space tools still work.
+
+**Consequences.** With pages blocked, an agent can still open tabs and navigate them (it can't see the result). `open_tab` and `navigate` still report the page title, which is what the sidebar shows anyway.

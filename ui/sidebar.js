@@ -8,7 +8,7 @@ const send = (msg) => console.log("__burrow__" + JSON.stringify(msg));
 const cmd = (name, args = {}) => send({ cmd: name, ...args });
 const act = (name, args = {}) => send({ act: name, ...args });
 
-let view = null; // { state, live, shown, downloads, toast, arc_available }
+let view = null; // { state, live, shown, downloads, toast, arc_available, agent_active, … }
 let busy = 0; // >0 while renaming or dragging: renders wait so they don't clobber the UI
 let pendingRender = false;
 let addressMode = null; // null | "edit" | "new"
@@ -153,6 +153,7 @@ function findFolder(nodes, id) {
 function renderToolbar() {
   $("btn-toggle").innerHTML = ICONS.sidebar;
   $("window-buttons").hidden = !view.frameless;
+  $("agent-badge").hidden = !view.agent_active;
   $("btn-min").innerHTML = ICONS.winMin;
   $("btn-max").innerHTML = view.maximized ? ICONS.winRestore : ICONS.winMax;
   $("btn-max").title = view.maximized ? "Restore" : "Maximize";
@@ -835,6 +836,10 @@ function addMenu(e) {
     { label: "Search Engine…", action: searchDialog },
     { label: "Auto-Archive…", action: archiveDialog },
     { label: "Keyboard Shortcuts", action: shortcutsDialog },
+    {
+      label: view.state.settings.agent_page_access ? "Block Agents from Pages" : "Let Agents Read and Use Pages",
+      action: () => act("set_agent_page_access", { on: !view.state.settings.agent_page_access }),
+    },
     {
       label: view.state.settings.system_title_bar ? "Use Arc-Style Window" : "Use Windows Title Bar",
       action: () => act("set_system_title_bar", { on: !view.state.settings.system_title_bar }),

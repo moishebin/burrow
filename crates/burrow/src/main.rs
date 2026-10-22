@@ -1,5 +1,6 @@
 #![cfg_attr(all(not(debug_assertions), target_os = "windows"), windows_subsystem = "windows")]
 
+mod agent;
 mod app;
 mod browser;
 mod clients;
@@ -13,6 +14,10 @@ mod views;
 use cef::*;
 
 fn main() {
+    // `burrow --mcp` / `burrow --agent …` are clients of a running Burrow, not the browser.
+    if let Some(code) = agent::main_if_requested() {
+        std::process::exit(code);
+    }
     let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
     let args = args::Args::new();
     let mut app = app::BurrowApp::new();
@@ -43,5 +48,6 @@ fn main() {
     }
     run_message_loop();
     browser::with(|b| b.save_now());
+    agent::stop_server();
     shutdown();
 }

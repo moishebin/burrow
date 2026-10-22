@@ -420,3 +420,120 @@ fn reopen_archived_by_index() {
     assert_eq!(s.archive.len(), 1);
     assert_eq!(s.archive[0].url, "https://b");
 }
+
+// ---- Agent tools (D-018) ------------------------------------------------------------------------
+
+fn tool(s: &mut State, name: &str, args: serde_json::Value) -> serde_json::Value {
+    agent::run_model_tool(s, name, &args).expect("model tool").unwrap_or_else(|e| panic!("{name}: {e}")).result
+}
+
+#[test]
+fn open_tab_in_background_keeps_the_shown_tab() {
+    let mut s = State::default();
+    let a = open(&mut s, "https://a");
+    let (b, _) = s.open_tab("https://b".into(), None, false).unwrap();
+    assert_eq!(s.active_tab().unwrap().id, a);
+    assert_eq!(s.active_space().today[0].id, b);
+    let (c, _) = s.open_tab("https://c".into(), None, true).unwrap();
+    assert_eq!(s.active_tab().unwrap().id, c);
+}
+
+#[test]
+fn open_tab_into_a_folder_of_another_space() {
+    let mut s = State::default();
+    let other = tool(&mut s, "create_space", serde_json::json!({ "name": "Work" }))["space_id"].as_str().unwrap().to_string();
+    assert_ne!(s.active_space, other, "creating a space doesn't switch to it");
+    let f = tool(&mut s, "create_folder", serde_json::json!({ "name": "Docs", "space_id": other }))["folder_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let to = agent::location(&serde_json::json!({ "space_id": other, "folder_id": f }), None).unwrap();
+    let (t, _) = s.open_tab("https://docs".into(), to, false).unwrap();
+    let info = agent::list_tabs(&s, Some(&other));
+    assert_eq!(info.len(), 1);
+    assert_eq!(info[0].id, t);
+    assert_eq!(info[0].section, Section::Pinned);
+    assert_eq!(info[0].folders, vec!["Docs".to_string()]);
+    assert_eq!(info[0].home_url.as_deref(), Some("https://docs"));
+}
+
+#[test]
+fn open_tab_into_missing_folder_leaves_nothing_behind() {
+    let mut s = State::default();
+    let to = agent::location(&serde_json::json!({ "folder_id": "nope" }), None).unwrap();
+    assert!(s.open_tab("https://x".into(), to, false).is_err());
+    assert!(s.active_space().today.is_empty());
+}
+
+#[test]
+fn delete_tab_removes_pinned_tabs_for_good() {
+    let mut s = State::default();
+    let t = open(&mut s, "https://mail");
+    s.apply(Command::MoveNode { node_id: t.clone(), to: loc(Section::Pinned) }).unwrap();
+    tool(&mut s, "close_tab", serde_json::json!({ "tab_id": t }));
+    assert!(s.tab(&t).is_some(), "plain close only unloads a pinned tab");
+    let fx = agent::run_model_tool(&mut s, "close_tab", &serde_json::json!({ "tab_id": t, "delete": true }))
+        .unwrap()
+        .unwrap()
+        .effects;
+    assert_eq!(fx, vec![Effect::CloseBrowser { tab_id: t.clone() }]);
+    assert!(s.tab(&t).is_none());
+}
+
+#[test]
+fn move_tab_keeps_its_section_unless_told() {
+    let mut s = State::default();
+    let a = open(&mut s, "https://a");
+    let b = open(&mut s, "https://b"); // today: b, a
+    tool(&mut s, "move_tab", serde_json::json!({ "node_id": a, "index": 0 }));
+    assert_eq!(s.active_space().today[0].id, a);
+    tool(&mut s, "move_tab", serde_json::json!({ "node_id": b, "section": "favorites" }));
+    assert_eq!(s.active_space().favorites[0].id, b);
+}
+
+#[test]
+fn update_folder_collapses_renames_and_deletes() {
+    let mut s = State::default();
+    let f = tool(&mut s, "create_folder", serde_json::json!({ "name": "A" }))["folder_id"].as_str().unwrap().to_string();
+    tool(&mut s, "update_folder", serde_json::json!({ "folder_id": f, "name": "B", "collapsed": true }));
+    tool(&mut s, "update_folder", serde_json::json!({ "folder_id": f, "collapsed": true }));
+    let Node::Folder(folder) = &s.active_space().pinned[0] else { panic!() };
+    assert_eq!((folder.name.as_str(), folder.collapsed), ("B", true));
+    tool(&mut s, "update_folder", serde_json::json!({ "folder_id": f, "delete": true }));
+    assert!(s.active_space().pinned.is_empty());
+    assert!(agent::run_model_tool(&mut s, "update_folder", &serde_json::json!({ "folder_id": f })).unwrap().is_err());
+}
+
+#[test]
+fn create_space_can_share_logins() {
+    let mut s = State::default();
+    let first = s.active_space.clone();
+    let id = tool(&mut s, "create_space", serde_json::json!({ "name": "Side", "share_logins_with": first, "color": "#bcd6f2", "focus": true }))
+        ["space_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert_eq!(s.active_space, id);
+    assert_eq!(s.profiles.len(), 1);
+    assert_eq!(s.space(&id).unwrap().color, "#bcd6f2");
+    let spaces = tool(&mut s, "list_spaces", serde_json::json!({}));
+    assert_eq!(spaces["spaces"][0]["shares_logins_with"][0], id);
+}
+
+#[test]
+fn every_tool_has_an_object_schema() {
+    for t in agent::TOOLS {
+        assert_eq!((t.schema)()["type"], "object", "{}", t.name);
+    }
+    assert!(agent::run_model_tool(&mut State::default(), "screenshot", &serde_json::json!({})).is_none());
+}
+
+#[test]
+fn page_tools_are_known_tools_and_tab_tools_are_not_page_tools() {
+    for name in agent::PAGE_TOOLS {
+        assert!(agent::tool(name).is_some(), "{name}");
+    }
+    for name in ["open_tab", "close_tab", "navigate", "create_space", "list_tabs"] {
+        assert!(!agent::is_page_tool(name), "{name}");
+    }
+}

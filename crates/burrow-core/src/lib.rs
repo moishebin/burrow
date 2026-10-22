@@ -1,6 +1,7 @@
 //! Burrow's browser-independent core: the sidebar model, the commands that change it, and
 //! persistence. See `docs/DECISIONS.md` D-005.
 
+pub mod agent;
 pub mod commands;
 pub mod import_arc;
 pub mod model;
