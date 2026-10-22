@@ -74,6 +74,9 @@ impl Burrow {
         if tool == "extensions" {
             return self.agent_extensions(&args, done);
         }
+        if tool == "picture_in_picture" {
+            return self.agent_pip(&args, done);
+        }
         if let Some(result) = self.app_tool(tool, &args) {
             return done(self, result);
         }
@@ -454,7 +457,7 @@ impl Burrow {
     // ---- DevTools ---------------------------------------------------------------------------------
 
     /// Sends one DevTools protocol call to a tab's page.
-    fn devtools(&mut self, tab: &str, method: &str, params: Value, done: Done) {
+    pub(super) fn devtools(&mut self, tab: &str, method: &str, params: Value, done: Done) {
         let Some(live) = self.tabs.get_mut(tab) else {
             return done(self, Err("the tab isn't loaded".into()));
         };
@@ -516,7 +519,7 @@ impl Burrow {
     }
 
     /// Evaluates JavaScript in the page; answers with its (JSON) value or the thrown error.
-    fn eval(&mut self, tab: &str, expression: String, done: Done) {
+    pub(super) fn eval(&mut self, tab: &str, expression: String, done: Done) {
         let params = json!({ "expression": expression, "returnByValue": true, "awaitPromise": true, "userGesture": true });
         self.devtools(
             tab,

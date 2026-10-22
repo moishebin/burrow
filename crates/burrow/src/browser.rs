@@ -18,11 +18,13 @@ use crate::{clients, consts, paths, task, views, writer};
 mod extensions;
 mod icons;
 mod peek;
+mod pip;
 mod tools;
 mod window_buttons;
 
 pub use extensions::{helper_tab_id, is_popup_browser, load_extension_switch, restart_requested, POPUP_PREFIX};
 pub use peek::is_peek_browser;
+pub use pip::BINDING as PIP_BINDING;
 
 thread_local! {
     static BURROW: RefCell<Option<Burrow>> = const { RefCell::new(None) };
@@ -246,6 +248,8 @@ pub struct Burrow {
     next_install: u64,
     /// Minimize, maximize and close in the corner, for the frameless window (D-035).
     window_buttons: Option<window_buttons::WindowButtons>,
+    /// The tab whose video is in picture in picture, as far as Burrow knows (D-036).
+    pip_tab: Option<Id>,
 }
 
 /// Messages from the sidebar that aren't model commands.
@@ -310,6 +314,9 @@ enum Act {
     RemoveExtension { id: String },
     UpdateExtensions,
     Restart,
+    /// Float the tab's video in picture in picture, or put it back (D-036).
+    TogglePip { tab_id: Id },
+    SetAutoPip { on: bool },
 }
 
 /// Starts Burrow: loads the state and creates the main window. Called once, on the UI thread.
@@ -385,6 +392,7 @@ pub fn start() {
             ext_installs: HashMap::new(),
             next_install: 1,
             window_buttons: None,
+            pip_tab: None,
         })
     });
     crate::agent::start_server();
@@ -749,6 +757,11 @@ impl Burrow {
                 }
             }
             Act::Restart => self.restart(),
+            Act::TogglePip { tab_id } => self.toggle_pip(&tab_id),
+            Act::SetAutoPip { on } => {
+                self.state.settings.auto_pip = on;
+                self.changed();
+            }
         }
     }
 
@@ -885,6 +898,8 @@ impl Burrow {
                 }
             }
             let focus = want != self.shown;
+            let left: Vec<Id> = self.visible.iter().filter(|id| !visible.contains(id)).cloned().collect();
+            let back = self.pip_tab.clone().filter(|p| visible.contains(p) && !self.visible.contains(p));
             self.shown = want;
             self.visible = visible;
             self.content.layout();
@@ -894,6 +909,12 @@ impl Burrow {
             for id in self.visible.clone() {
                 self.end_emulation(&id);
             }
+            // Arc-style picture in picture: a video floats out of the tab we left, and goes back
+            // into a tab we return to.
+            if let Some(id) = back {
+                self.stop_pip(&id, Box::new(|_, _| {}));
+            }
+            self.auto_pip(left);
         } else if self.shown.is_none() {
             // E.g. the last tab was just closed: keep keyboard focus somewhere that has shortcuts.
             self.sidebar.request_focus();
@@ -1010,6 +1031,9 @@ impl Burrow {
             self.shown = None;
         }
         self.visible.retain(|v| v != tab_id);
+        if self.pip_tab.as_deref() == Some(tab_id) {
+            self.pip_tab = None;
+        }
         if self.page_fullscreen.as_deref() == Some(tab_id) {
             self.set_fullscreen(false);
         }
@@ -1395,6 +1419,11 @@ impl Burrow {
                 }
             }
             Shortcut::DevTools => self.act(Act::DevTools { sidebar: false }),
+            Shortcut::PictureInPicture => {
+                if let Some(id) = self.shown.clone() {
+                    self.toggle_pip(&id);
+                }
+            }
             Shortcut::SidebarDevTools => self.act(Act::DevTools { sidebar: true }),
             Shortcut::Zoom(dir) => {
                 self.with_active_browser(|b| {
@@ -1731,6 +1760,7 @@ impl Burrow {
                 peek: Option<&'a str>,
                 fullscreen: bool,
                 windows: bool,
+                pip: Option<&'a str>,
                 extensions: extensions::ExtensionsView<'a>,
             }
             let view = View {
@@ -1768,6 +1798,7 @@ impl Burrow {
                 peek: b.peek.as_ref().map(|p| p.url.as_str()),
                 fullscreen: b.fullscreen,
                 windows: cfg!(target_os = "windows"),
+                pip: b.pip_tab.as_deref(),
                 extensions: b.extensions_view(),
             };
             match serde_json::to_string(&view) {
@@ -1808,6 +1839,7 @@ pub enum Shortcut {
     CopyUrl,
     Print,
     History,
+    PictureInPicture,
 }
 
 fn open_path(path: &str) {

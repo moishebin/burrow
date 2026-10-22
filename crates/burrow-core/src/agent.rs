@@ -309,6 +309,20 @@ pub const TOOLS: &[Tool] = &[
         },
     },
     Tool {
+        name: "picture_in_picture",
+        description: "Picture in picture: float a tab's video in a small window over everything (open), put it back (close), or see which tab's video floats (status). auto turns Auto Picture in Picture on or off: leaving a tab whose video plays with sound floats it, and coming back puts it back. Only when the user asks: open shows a window.",
+        schema: || {
+            object(
+                json!({
+                    "action": { "type": "string", "enum": ["status", "open", "close"], "description": "Default status." },
+                    "tab_id": tab_id(),
+                    "auto": { "type": "boolean" }
+                }),
+                &[],
+            )
+        },
+    },
+    Tool {
         name: "window",
         description: "Get or change Burrow's window: minimize, maximize, restore, fullscreen on or off, or show_buttons (slides out the minimize/maximize/close buttons in the top-right corner for two seconds, as hovering does). Change it only when the user asks. Default status.",
         schema: || {

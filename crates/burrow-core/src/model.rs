@@ -100,6 +100,9 @@ pub struct Settings {
     /// The sidebar's width in DIPs, set by dragging its right edge (D-033).
     #[serde(default = "default_sidebar_width")]
     pub sidebar_width: u32,
+    /// Leaving a tab whose video plays with sound floats the video in picture in picture (D-036).
+    #[serde(default = "yes")]
+    pub auto_pip: bool,
 }
 
 pub const SIDEBAR_WIDTH_DEFAULT: u32 = 264;
@@ -133,6 +136,7 @@ impl Default for Settings {
             peek_new_tabs: true,
             peek_from_pinned: true,
             sidebar_width: SIDEBAR_WIDTH_DEFAULT,
+            auto_pip: true,
         }
     }
 }

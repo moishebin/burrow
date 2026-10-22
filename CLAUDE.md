@@ -5,7 +5,7 @@ Open-source Arc-style browser: Rust + CEF (cef-rs), Windows first, developed in 
 ## Rules
 
 - Record every non-obvious decision in `docs/DECISIONS.md` (append a new D-NNN; never rewrite history) and keep `docs/FEATURES.md` statuses current. The owner relies on both.
-- The owner's must-haves: pinned tabs and folders with a fixed place, spaces with separate logins in **one window**, and per-space favorites. Never add anything that opens a second window.
+- The owner's must-haves: pinned tabs and folders with a fixed place, spaces with separate logins in **one window**, and per-space favorites. Never add anything that opens a second window (the one exception: Chromium's picture-in-picture video window, requested, D-036).
 - Model logic goes in `crates/burrow-core` with unit tests. The app crate only translates CEF events into commands and effects.
 - CEF callbacks must not touch the controller directly: use `browser::later(...)` (D-009). The only synchronous `browser::with` calls are ones where CEF needs an answer now (`can_close`, `is_frameless`, popups, permissions).
 - Text from web pages goes into the sidebar with `textContent`, never `innerHTML`.

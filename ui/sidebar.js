@@ -250,6 +250,12 @@ function tabRow(t, section, depth) {
     m.onclick = (e) => (e.stopPropagation(), act("set_muted", { tab_id: t.id, muted: false }));
     row.append(m);
   }
+  if (view.pip === t.id) {
+    const p = icon("pip", "flag");
+    p.title = "Playing in picture in picture — click to put the video back";
+    p.onclick = (e) => (e.stopPropagation(), act("toggle_pip", { tab_id: t.id }));
+    row.append(p);
+  }
   if (inSplit(t.id)) {
     const sp = icon("split", "flag");
     sp.title = "In Split View";
@@ -845,6 +851,7 @@ function tabMenu(e, t, section) {
     inSplit(t.id) && { label: "Close Split View", action: () => cmd("unsplit", { space_id: null }) },
     { label: "Duplicate Tab", action: () => cmd("duplicate_tab", { tab_id: t.id }) },
     live && { label: live.muted ? "Unmute Tab" : "Mute Tab", action: () => act("set_muted", { tab_id: t.id, muted: !live.muted }) },
+    live && { label: view.pip === t.id ? "Exit Picture in Picture" : "Picture in Picture", action: () => act("toggle_pip", { tab_id: t.id }) },
     web && { label: "Send This Site to a Space…", action: () => atcDialog(hostOf(t.url)) },
     web && { label: "Boost This Site…", action: () => boostDialog(hostOf(t.url)) },
     { sep: true },
@@ -945,6 +952,10 @@ function addMenu(e) {
     { label: "Links and Peek…", action: peekDialog },
     { label: "Search Engine…", action: searchDialog },
     { label: "Auto-Archive…", action: archiveDialog },
+    {
+      label: view.state.settings.auto_pip ? "Turn Off Auto Picture in Picture" : "Turn On Auto Picture in Picture",
+      action: () => act("set_auto_pip", { on: !view.state.settings.auto_pip }),
+    },
     { label: "Extensions…", action: extensionsDialog },
     { label: "Keyboard Shortcuts", action: shortcutsDialog },
     {
@@ -1133,6 +1144,7 @@ function shortcutsDialog() {
     ["Ctrl+S", "Hide / show sidebar"], ["Alt+← / →", "Back / forward"], ["Ctrl+R, F5", "Reload"],
     ["Ctrl+= / − / 0", "Zoom (remembered per site)"], ["Ctrl+F", "Find in page"], ["Ctrl+Shift+T", "Reopen closed tab"],
     ["Ctrl+H", "History"], ["Ctrl+Shift+C", "Copy page address"], ["Ctrl+P", "Print"], ["F11", "Full screen"],
+    ["Ctrl+Shift+P", "Picture in picture"],
     ["Esc", "Close a Peek"], ["F12", "DevTools"],
   ];
   openDialog((d) => {

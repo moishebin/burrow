@@ -343,3 +343,19 @@ Releases are GitHub releases tagged `v<version>`, with the archives attached. Th
 - Agents: the `window` tool (status, minimize, maximize, restore, fullscreen on/off, show_buttons for two seconds).
 
 **Verified** on Linux/Xvfb with real mouse moves: nothing visible at rest, the buttons appear when the corner is hovered and hide after leaving; the `window` tool shows them.
+
+## D-036 · Picture in picture, Arc-style (2026-10-22)
+
+**Context.** Picture in picture for all videos, like Arc, was requested: leave a tab while its video plays and the video keeps playing in a small floating window.
+
+**Finding.** Chromium's own picture-in-picture works in CEF 154 with Alloy-style tabs: `document.pictureInPictureEnabled` is true and `requestPictureInPicture()` opens Chromium's always-on-top video window, with its play/pause, "back to tab" and close buttons. This is the same window Arc uses. It is the one exception to "one window" (D-003): it holds only a video, not a page, and closes when the video goes back.
+
+**Decision.**
+- **Auto picture in picture** (on by default; + menu to turn off): when a tab leaves the content area (another tab, another space, or out of split view), Burrow asks its page through DevTools for a video that is playing **with sound** and floats the largest one. Muted loops (background videos on sites) never pop out. Pages may only start picture in picture after a user gesture; `Runtime.evaluate` with `userGesture` gives one. Coming back to the tab puts the video back. Not while a page is fullscreen.
+- **By hand**: right-click a tab → Picture in Picture (any playing video, else any loaded one), or Ctrl+Shift+P for the shown tab. A small icon on the tab row shows the floating video; clicking it puts it back.
+- **Back to tab.** CEF reports nothing when the window's "back to tab" button is pressed (no focus callback, checked). Pages learn through `leavepictureinpicture`, reported to Burrow with a DevTools binding (`Runtime.addBinding`, `__burrowPip`). Chromium pauses the video when the window is *closed* but not on "back to tab", so a video still playing means "back to tab": Burrow selects the tab, in its space, and brings the window to the front. A live stream (a call, `srcObject`) can't pause, so there the two look the same and Burrow does nothing. Pages can call the binding themselves; Burrow believes "entered" only after checking `document.pictureInPictureElement`, and "back" only for the tab it knows is floating.
+- Agents: the `picture_in_picture` tool (status, open, close, auto on/off).
+
+**Verified** on Linux/Xvfb: switching tabs floated a playing video (the floating window appeared, the tab got its icon); clicking the tab again closed the window with the video still playing in the page; "back to tab" in the floating window showed the tab; its close button paused a file video and stayed on the current tab, and for a live stream also stayed; Ctrl+Shift+P toggled it; the agent tool reported and refused correctly.
+
+**Limits.** Videos inside iframes (e.g. a YouTube embed in an article) aren't found: the script runs in the top page only. Chrome's "auto picture in picture" for video calls when the whole app loses focus isn't done.

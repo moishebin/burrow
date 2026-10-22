@@ -83,6 +83,7 @@ pub const SHORTCUTS: &[(Shortcut, i32, u32)] = &[
     (Shortcut::Print, key('P'), CTRL),
     (Shortcut::History, key('H'), CTRL),
     (Shortcut::History, key('Y'), CTRL),
+    (Shortcut::PictureInPicture, key('P'), CTRL | SHIFT),
 ];
 
 fn shortcut_for(event: &KeyEvent) -> Option<Shortcut> {
@@ -707,6 +708,20 @@ wrap_dev_tools_message_observer! {
         ) {
             let json = String::from_utf8_lossy(result.unwrap_or_default()).into_owned();
             browser::later(move |b| b.on_devtools_result(message_id, success != 0, &json));
+        }
+
+        /// Picture in picture reports through a binding (D-036).
+        fn on_dev_tools_event(&self, browser: Option<&mut Browser>, method: Option<&CefString>, params: Option<&[u8]>) {
+            if string(method) != "Runtime.bindingCalled" {
+                return;
+            }
+            let Some(id) = id_of(browser) else { return };
+            let Ok(v) = serde_json::from_slice::<serde_json::Value>(params.unwrap_or_default()) else { return };
+            if v["name"] != browser::PIP_BINDING {
+                return;
+            }
+            let event = v["payload"].as_str().unwrap_or_default().to_string();
+            browser::later(move |b| b.on_pip_event(id, &event));
         }
     }
 }
