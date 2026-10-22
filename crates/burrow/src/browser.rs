@@ -13,12 +13,14 @@ use burrow_core::{
 use cef::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{clients, consts, paths, task, views};
+use crate::{clients, consts, paths, task, views, writer};
 
+mod extensions;
 mod icons;
 mod peek;
 mod tools;
 
+pub use extensions::{helper_tab_id, is_popup_browser, load_extension_switch, restart_requested, POPUP_PREFIX};
 pub use peek::is_peek_browser;
 
 thread_local! {
@@ -64,6 +66,8 @@ struct LiveTab {
     devtools: Option<Registration>,
     /// An agent gave the hidden page a viewport size; undone when the tab is shown.
     emulated: bool,
+    /// The tab's id for the extension APIs, once the helper extension has said (D-032).
+    ext_tab: Option<i32>,
 }
 
 #[derive(Default, Clone, Copy, Serialize)]
@@ -230,9 +234,15 @@ pub struct Burrow {
     fullscreen: bool,
     /// The tab whose page went fullscreen; it alone fills the window.
     page_fullscreen: Option<Id>,
-    /// Browsers of closed Peeks that haven't finished closing; the window waits for them.
+    /// Browsers of closed Peeks and extension popups that haven't finished closing; the window
+    /// waits for them.
     dying_peeks: Vec<i32>,
     icons: icons::Icons,
+    /// The open extension popup (D-032).
+    ext_popup: Option<extensions::Popup>,
+    /// Extensions being downloaded or unpacked, by a running number.
+    ext_installs: HashMap<u64, extensions::Install>,
+    next_install: u64,
 }
 
 /// Messages from the sidebar that aren't model commands.
@@ -284,6 +294,19 @@ enum Act {
     Print,
     /// Register Burrow as a browser with Windows and open the Default Apps settings.
     MakeDefaultBrowser,
+    /// The sidebar's right edge is being dragged; `save` once the mouse is released (D-033).
+    SetSidebarWidth { width: i64, save: bool },
+    /// Show an extension's popup (D-032).
+    OpenExtension { id: String },
+    CloseExtensionPopup,
+    /// Install from a Chrome Web Store link or id.
+    InstallExtension { input: String },
+    /// Ask for an extension folder, or a .crx/.zip file, and install it.
+    ChooseExtensionFile { folder: bool },
+    SetExtensionEnabled { id: String, enabled: bool },
+    RemoveExtension { id: String },
+    UpdateExtensions,
+    Restart,
 }
 
 /// Starts Burrow: loads the state and creates the main window. Called once, on the UI thread.
@@ -292,6 +315,7 @@ pub fn start() {
         eprintln!("Burrow: could not read state ({e}); starting fresh");
         State::default()
     });
+    views::set_sidebar_width(state.settings.sidebar_width as i32);
 
     let mut sidebar_client = clients::SidebarClient::new();
     let mut sidebar_delegate = views::SidebarViewDelegate::new();
@@ -354,6 +378,9 @@ pub fn start() {
             page_fullscreen: None,
             dying_peeks: Vec::new(),
             icons: icons::Icons::load(),
+            ext_popup: None,
+            ext_installs: HashMap::new(),
+            next_install: 1,
         })
     });
     crate::agent::start_server();
@@ -468,6 +495,7 @@ impl Burrow {
             self.closing = true;
             CLOSING.store(true, std::sync::atomic::Ordering::Relaxed);
             self.close_peek();
+            self.close_extension_popup();
             self.save_now();
             // Remember which browser is whose now: views may forget their browser while closing.
             self.tabs.retain(|_, t| match t.view.browser() {
@@ -687,6 +715,34 @@ impl Burrow {
                 self.toast = Some(crate::external::register_default_browser());
                 self.push_state();
             }
+            Act::SetSidebarWidth { width, save } => {
+                self.set_sidebar_width(width);
+                if save {
+                    self.changed();
+                }
+            }
+            Act::OpenExtension { id } => {
+                if let Err(e) = self.open_extension_popup(&id) {
+                    self.toast = Some(e);
+                    self.push_state();
+                }
+            }
+            Act::CloseExtensionPopup => self.close_extension_popup(),
+            Act::InstallExtension { input } => self.install_from_web_store(&input, None),
+            Act::ChooseExtensionFile { folder } => self.choose_extension_file(folder),
+            Act::SetExtensionEnabled { id, enabled } => {
+                self.set_extension_enabled(&id, enabled);
+            }
+            Act::RemoveExtension { id } => {
+                self.remove_extension(&id);
+            }
+            Act::UpdateExtensions => {
+                if self.update_extensions(None) == 0 {
+                    self.toast = Some("No extensions from the Chrome Web Store to update.".into());
+                    self.push_state();
+                }
+            }
+            Act::Restart => self.restart(),
         }
     }
 
@@ -731,18 +787,26 @@ impl Burrow {
         if !self.save_pending {
             self.save_pending = true;
             task::post_ui_delayed(1500, || {
-                with(|b| b.save_now());
+                with(|b| b.save(false));
             });
         }
     }
 
+    /// Saves before returning (on shutdown).
     pub fn save_now(&mut self) {
+        self.save(true);
+    }
+
+    /// Serializes here, but writes on another thread unless `wait` (D-034).
+    fn save(&mut self, wait: bool) {
         self.save_pending = false;
-        if let Err(e) = store::save(&paths::state_file(), &self.state) {
-            eprintln!("Burrow: could not save state: {e}");
+        match store::encode(&self.state) {
+            Ok(json) if wait => writer::write_now(&paths::state_file(), &json),
+            Ok(json) => writer::write_soon(paths::state_file(), json),
+            Err(e) => eprintln!("Burrow: could not save state: {e}"),
         }
         if self.history_pending {
-            self.save_history();
+            self.save_history(wait);
         }
     }
 
@@ -751,15 +815,17 @@ impl Burrow {
         if !self.history_pending {
             self.history_pending = true;
             task::post_ui_delayed(10_000, || {
-                with(|b| b.save_history());
+                with(|b| b.save_history(false));
             });
         }
     }
 
-    fn save_history(&mut self) {
+    fn save_history(&mut self, wait: bool) {
         self.history_pending = false;
-        if let Err(e) = history::save(&paths::history_file(), &self.history) {
-            eprintln!("Burrow: could not save history: {e}");
+        match history::encode(&self.history) {
+            Ok(json) if wait => writer::write_now(&paths::history_file(), &json),
+            Ok(json) => writer::write_soon(paths::history_file(), json),
+            Err(e) => eprintln!("Burrow: could not save history: {e}"),
         }
     }
 
@@ -797,6 +863,7 @@ impl Burrow {
             // A Peek belongs to the page it was opened over.
             if want != self.shown {
                 self.close_peek();
+                self.close_extension_popup();
             }
             for id in &self.visible {
                 if !visible.contains(id)
@@ -872,6 +939,7 @@ impl Burrow {
                 loads: 0,
                 devtools: None,
                 emulated: false,
+                ext_tab: None,
             },
         );
     }
@@ -986,8 +1054,14 @@ impl Burrow {
     }
 
     fn resize_sidebar(&mut self) {
+        self.apply_sidebar_width();
+        self.push_state();
+    }
+
+    /// Sizes the sidebar view: its chosen width, or the edge strip while hidden.
+    fn apply_sidebar_width(&mut self) {
         views::set_sidebar_width(if self.sidebar_shown() {
-            consts::SIDEBAR_WIDTH
+            self.state.settings.sidebar_width as i32
         } else {
             consts::SIDEBAR_COLLAPSED_WIDTH
         });
@@ -997,7 +1071,23 @@ impl Burrow {
         }
         self.apply_drag_regions();
         self.layout_peek();
-        self.push_state();
+        self.layout_extension_popup();
+    }
+
+    /// Sets the sidebar's width (D-033), leaving the page at least `MIN_CONTENT_WIDTH`. Returns
+    /// the width it got.
+    pub fn set_sidebar_width(&mut self, width: i64) -> u32 {
+        const MIN_CONTENT_WIDTH: i64 = 320;
+        let window_width = self.window.as_ref().map_or(i64::MAX, |w| w.bounds().width as i64);
+        let room = (window_width - MIN_CONTENT_WIDTH).max(burrow_core::model::SIDEBAR_WIDTH_MIN as i64);
+        let width = burrow_core::model::clamp_sidebar_width(width.min(room));
+        if width != self.state.settings.sidebar_width {
+            self.state.settings.sidebar_width = width;
+            if self.sidebar_shown() {
+                self.apply_sidebar_width();
+            }
+        }
+        width
     }
 
     pub fn frameless(&self) -> bool {
@@ -1034,6 +1124,7 @@ impl Burrow {
     pub fn on_window_resized(&mut self) {
         self.apply_drag_regions();
         self.layout_peek();
+        self.layout_extension_popup();
         self.push_state();
     }
 
@@ -1048,6 +1139,9 @@ impl Burrow {
                 }
         }
         PAGE_FULLSCREEN.store(on && self.page_fullscreen.is_some(), std::sync::atomic::Ordering::Relaxed);
+        if on {
+            self.close_extension_popup();
+        }
         if self.fullscreen != on {
             self.fullscreen = on;
             if let Some(w) = &self.window {
@@ -1206,7 +1300,9 @@ impl Burrow {
                 }
             }
             Shortcut::Escape => {
-                if self.peek.is_some() {
+                if self.ext_popup.is_some() {
+                    self.close_extension_popup();
+                } else if self.peek.is_some() {
                     self.close_peek();
                 } else if self.page_fullscreen.is_some() {
                     self.set_fullscreen(false);
@@ -1477,6 +1573,9 @@ impl Burrow {
         if self.is_peek(browser_id) {
             return self.on_peek_closed();
         }
+        if self.is_extension_popup(browser_id) {
+            return self.on_extension_popup_closed();
+        }
         let Some(id) = self.tab_of_browser(browser_id) else { return };
         self.tabs.remove(&id);
         if self.closing {
@@ -1494,6 +1593,9 @@ impl Burrow {
         if self.is_peek(browser_id) {
             return self.close_peek();
         }
+        if self.is_extension_popup(browser_id) {
+            return self.close_extension_popup();
+        }
         if let Some(id) = self.tab_of_browser(browser_id) {
             self.command(Command::CloseTab { tab_id: id });
         }
@@ -1501,6 +1603,10 @@ impl Burrow {
 
     /// In split view, clicking into the other half makes it the active tab.
     pub fn on_tab_focused(&mut self, browser_id: i32) {
+        // Clicking anywhere else closes an extension popup, as in Chrome.
+        if !self.is_extension_popup(browser_id) {
+            self.close_extension_popup();
+        }
         let Some(id) = self.tab_of_browser(browser_id) else { return };
         if self.visible.len() > 1 && self.visible.contains(&id) && self.shown.as_deref() != Some(&*id) {
             self.state.active_space_mut().active_tab = Some(id.clone());
@@ -1607,6 +1713,7 @@ impl Burrow {
                 peek: Option<&'a str>,
                 fullscreen: bool,
                 windows: bool,
+                extensions: extensions::ExtensionsView<'a>,
             }
             let view = View {
                 state: &b.state,
@@ -1643,6 +1750,7 @@ impl Burrow {
                 peek: b.peek.as_ref().map(|p| p.url.as_str()),
                 fullscreen: b.fullscreen,
                 windows: cfg!(target_os = "windows"),
+                extensions: b.extensions_view(),
             };
             match serde_json::to_string(&view) {
                 Ok(json) => b.run_in_sidebar(&format!("window.burrow && burrow.render({json})")),

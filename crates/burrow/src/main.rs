@@ -8,9 +8,11 @@ mod clipboard;
 mod consts;
 mod external;
 mod paths;
+mod scheme;
 mod switches;
 mod task;
 mod views;
+mod writer;
 
 use cef::*;
 
@@ -51,4 +53,12 @@ fn main() {
     browser::with(|b| b.save_now());
     agent::stop_server();
     shutdown();
+    // "Restart Burrow" (to load changed extensions, D-032): start again now that this process
+    // has let go of the profile. Links it was started with aren't opened twice.
+    if browser::restart_requested() {
+        let flags = std::env::args().skip(1).filter(|a| a.starts_with("--") && !a.starts_with("--load-extension"));
+        if let Err(e) = std::process::Command::new(std::env::current_exe().unwrap_or_default()).args(flags).spawn() {
+            eprintln!("Burrow: could not restart: {e}");
+        }
+    }
 }

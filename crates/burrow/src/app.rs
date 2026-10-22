@@ -1,6 +1,6 @@
 use cef::*;
 
-use crate::{browser, switches};
+use crate::{browser, scheme, switches};
 
 wrap_app! {
     pub struct BurrowApp {}
@@ -14,6 +14,16 @@ wrap_app! {
             let is_browser = process_type.is_none_or(|t| t.to_string().is_empty());
             if let (true, Some(cl)) = (is_browser, command_line) {
                 switches::apply(cl);
+                // Installed extensions load at startup (D-032).
+                if let Some(dirs) = browser::load_extension_switch() {
+                    cl.append_switch_with_value(Some(&CefString::from("load-extension")), Some(&CefString::from(dirs.as_str())));
+                }
+            }
+        }
+
+        fn on_register_custom_schemes(&self, registrar: Option<&mut SchemeRegistrar>) {
+            if let Some(r) = registrar {
+                scheme::register_custom_scheme(r);
             }
         }
 
@@ -27,6 +37,7 @@ wrap_browser_process_handler! {
     struct BurrowProcessHandler {}
     impl BrowserProcessHandler {
         fn on_context_initialized(&self) {
+            scheme::register_handler();
             browser::start();
         }
 

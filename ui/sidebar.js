@@ -29,6 +29,12 @@ function icon(name, cls = "ico") {
   e.innerHTML = ICONS[name]; // static markup from icons.js
   return e;
 }
+/** Shows icon `name` in an existing element, reparsing the SVG only when it changes. */
+function setIcon(e, name) {
+  if (e.dataset.icon === name) return;
+  e.dataset.icon = name;
+  e.innerHTML = ICONS[name]; // static markup from icons.js
+}
 const space = () => view.state.spaces.find((s) => s.id === view.state.active_space) || view.state.spaces[0];
 function hostOf(url) {
   try {
@@ -71,6 +77,10 @@ function savedIcon(url) {
   return file ? view.icons.base + file : null;
 }
 
+// Icon URLs that failed to load. Every render rebuilds the rows, so without this each one
+// would download the same missing icons again.
+const brokenIcons = new Set();
+
 function favicon(tab, size = 16) {
   if (isLoading(tab.id)) return el("span", "spinner");
   // Best first: the saved icon of the site the tab is on, of its home site, the icon the page
@@ -80,13 +90,14 @@ function favicon(tab, size = 16) {
   if (/^https?:/.test(tab.url)) {
     try { sources.push(new URL(tab.url).origin + "/favicon.ico"); } catch { /* not a URL */ }
   }
-  const list = [...new Set(sources.filter(Boolean))];
+  const list = [...new Set(sources.filter(Boolean))].filter((u) => !brokenIcons.has(u));
   if (!list.length) return icon("globe", "ico");
   const img = el("img", "favicon");
   img.width = img.height = size;
   let i = 0;
   // Swap the source rather than the element: errors can fire before the img is attached.
   img.onerror = () => {
+    brokenIcons.add(list[i]);
     i += 1;
     if (i < list.length) img.src = list[i];
     else {
@@ -149,9 +160,19 @@ function render() {
   }
 }
 
+// A page load sends several views in a row (address, title, icon, loading): draw only the last
+// one, once per frame.
+let renderQueued = false;
 function scheduleRender() {
   if (busy > 0) pendingRender = true;
-  else render();
+  else if (!renderQueued) {
+    renderQueued = true;
+    requestAnimationFrame(() => {
+      renderQueued = false;
+      if (busy > 0) pendingRender = true;
+      else render();
+    });
+  }
 }
 
 function findFolder(nodes, id) {
@@ -165,22 +186,24 @@ function findFolder(nodes, id) {
 }
 
 function renderToolbar() {
-  $("btn-toggle").innerHTML = ICONS.sidebar;
+  setIcon($("btn-toggle"), "sidebar");
   $("window-buttons").hidden = !view.frameless;
   $("agent-badge").hidden = !view.agent_active;
-  $("btn-min").innerHTML = ICONS.winMin;
-  $("btn-max").innerHTML = view.maximized ? ICONS.winRestore : ICONS.winMax;
+  setIcon($("btn-min"), "winMin");
+  setIcon($("btn-max"), view.maximized ? "winRestore" : "winMax");
   $("btn-max").title = view.maximized ? "Restore" : "Maximize";
-  $("btn-close").innerHTML = ICONS.winClose;
+  setIcon($("btn-close"), "winClose");
   const nav = (view.shown && view.live[view.shown]) || {};
   const back = $("btn-back"), fwd = $("btn-forward"), reload = $("btn-reload");
-  back.innerHTML = ICONS.back;
-  fwd.innerHTML = ICONS.forward;
+  setIcon(back, "back");
+  setIcon(fwd, "forward");
   back.disabled = !nav.can_back;
   fwd.disabled = !nav.can_forward;
-  reload.innerHTML = nav.loading ? ICONS.stop : ICONS.reload;
+  setIcon(reload, nav.loading ? "stop" : "reload");
   reload.title = nav.loading ? "Stop" : "Reload (Ctrl+R)";
   reload.disabled = !view.shown;
+  setIcon($("btn-extensions"), "puzzle");
+  $("btn-extensions").classList.toggle("on", !!view.extensions.popup);
 }
 
 function renderAddress() {
@@ -189,7 +212,7 @@ function renderAddress() {
   const zoom = $("zoom");
   zoom.hidden = !tab || !view.zoom || view.zoom === 100;
   zoom.textContent = `${view.zoom}%`;
-  $("address-lock").innerHTML = ICONS.lock;
+  setIcon($("address-lock"), "lock");
   $("address-lock").classList.toggle("on", !!tab && tab.url.startsWith("https:") && addressMode === null);
   if (addressMode !== null) return; // the user is typing
   input.value = tab ? hostOf(tab.url) : "";
@@ -323,7 +346,7 @@ function renderSpaces() {
 
 function renderDownloadsButton() {
   const b = $("btn-downloads");
-  b.innerHTML = ICONS.download;
+  setIcon(b, "download");
   const d = view.downloads || [];
   b.classList.toggle("has", d.length > 0);
   b.classList.toggle("busy", d.some((x) => !x.done && !x.canceled));
@@ -538,6 +561,7 @@ const PERMISSION_TEXT = {
 function renderPrompts() {
   const box = $("prompts");
   box.replaceChildren();
+  renderExtensionPrompts(box);
   for (const p of view.permissions || []) {
     const card = el("div", "prompt");
     const what = el("div", "what");
@@ -770,6 +794,7 @@ function fillMenu(items, parentItems) {
       continue;
     }
     const b = el("button", "item" + (it.danger ? " danger" : ""), it.label);
+    if (it.img !== undefined) b.prepend(extImage(it.img, "mimg"));
     if (it.sub) {
       b.append(el("span", "chev", "›"));
       b.onclick = (e) => (e.stopPropagation(), fillMenu(it.sub, items));
@@ -784,7 +809,16 @@ function hideMenu() {
   menu.hidden = true;
 }
 document.addEventListener("click", (e) => !menu.contains(e.target) && hideMenu());
-document.addEventListener("keydown", (e) => e.key === "Escape" && (hideMenu(), closeDialog()));
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  hideMenu();
+  closeDialog();
+  if (view && view.extensions.popup) act("close_extension_popup");
+});
+// Clicking anywhere in the sidebar closes an extension popup, as clicking outside one does in Chrome.
+document.addEventListener("mousedown", (e) => {
+  if (view && view.extensions.popup && !e.target.closest("#btn-extensions, #menu")) act("close_extension_popup");
+});
 window.addEventListener("blur", hideMenu);
 
 function moveToSpaceItems(id, section) {
@@ -916,6 +950,7 @@ function addMenu(e) {
     { label: "Links and Peek…", action: peekDialog },
     { label: "Search Engine…", action: searchDialog },
     { label: "Auto-Archive…", action: archiveDialog },
+    { label: "Extensions…", action: extensionsDialog },
     { label: "Keyboard Shortcuts", action: shortcutsDialog },
     {
       label: view.state.settings.agent_page_access ? "Block Agents from Pages" : "Let Agents Read and Use Pages",
@@ -1302,6 +1337,202 @@ function historyDialog() {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Extensions (D-032)
+
+/** The Web Store id of a store page's address, if it is one. */
+function webStoreId(url) {
+  const m = /^https:\/\/(?:chromewebstore\.google\.com\/detail\/(?:[^/?#]+\/)?|chrome\.google\.com\/webstore\/detail\/(?:[^/?#]+\/)?)([a-p]{32})(?:[/?#]|$)/.exec(url || "");
+  return m ? m[1] : null;
+}
+const extIconUrl = (x) => (x.icon ? `burrow://ext/${x.dir}/${x.icon.split("/").map(encodeURIComponent).join("/")}` : null);
+const extRunning = (x) => view.extensions.running.includes(x.id);
+
+/** An extension's icon, or a puzzle piece if it has none (or it doesn't load). */
+function extImage(url, cls) {
+  if (!url) return icon("puzzle", "ico");
+  const img = el("img", cls);
+  img.onerror = () => img.replaceWith(icon("puzzle", "ico"));
+  img.src = url;
+  return img;
+}
+
+let restartLater = null; // the extension list the user said "Later" to
+
+function renderExtensionPrompts(box) {
+  const xv = view.extensions;
+  const list = JSON.stringify(view.state.extensions.map((x) => [x.id, x.version, x.enabled]));
+  if (xv.restart_needed && restartLater !== list) {
+    const card = el("div", "prompt");
+    card.append(el("div", "what", "Restart Burrow to apply your extension changes. Your tabs come back as they are."));
+    const buttons = el("div", "buttons");
+    const later = el("button", "btn", "Later");
+    later.onclick = () => ((restartLater = list), render());
+    const now = el("button", "btn allow", "Restart");
+    now.onclick = () => act("restart");
+    buttons.append(el("label"), later, now);
+    card.append(buttons);
+    box.append(card);
+  }
+  // On a Chrome Web Store page: its "Add to Chrome" doesn't work here, so offer Burrow's.
+  const tab = view.shown ? findTab(view.shown) : null;
+  const id = tab && webStoreId(tab.url);
+  if (id && !view.state.extensions.some((x) => x.id === id)) {
+    const card = el("div", "prompt");
+    const installing = xv.installing.length > 0;
+    card.append(el("div", "what", installing ? "Installing…" : "Add this extension to Burrow?"));
+    const buttons = el("div", "buttons");
+    const add = el("button", "btn allow", "Add to Burrow");
+    add.disabled = installing;
+    add.onclick = () => act("install_extension", { input: tab.url });
+    buttons.append(el("label"), add);
+    card.append(buttons);
+    box.append(card);
+  }
+}
+
+function extensionsMenu(e) {
+  const on = view.state.extensions.filter((x) => x.enabled);
+  const items = on.map((x) => ({
+    label: extRunning(x) ? x.name : `${x.name} (after restart)`,
+    img: extIconUrl(x),
+    action: () => act("open_extension", { id: x.id }),
+  }));
+  if (!on.length) items.push({ heading: view.state.extensions.length ? "All extensions are off" : "No extensions yet" });
+  items.push(
+    { sep: true },
+    { label: "Manage Extensions…", action: extensionsDialog },
+    { label: "Chrome Web Store", action: () => act("open_url", { url: "https://chromewebstore.google.com/" }) },
+  );
+  showMenu(e, items);
+}
+
+function extensionsDialog() {
+  openDialog((d) => {
+    d.classList.add("wide");
+    d.append(el("h2", null, "Extensions"));
+    d.append(el("p", null, "Extensions from the Chrome Web Store run in every space, each space with its own storage and sign-ins. Adding, removing, updating or turning one on or off takes effect when Burrow restarts."));
+    const notice = el("div");
+    const list = el("div", "ext-list");
+    d.append(notice, list);
+    const fill = () => {
+      const xv = view.extensions;
+      notice.replaceChildren();
+      if (xv.restart_needed) {
+        const n = el("div", "notice");
+        const restart = el("button", "btn primary", "Restart Now");
+        restart.onclick = () => act("restart");
+        n.append(el("span", null, "Restart Burrow to apply your changes."), restart);
+        notice.append(n);
+      }
+      list.replaceChildren();
+      for (const name of xv.installing) {
+        const row = el("div", "ext");
+        const text = el("div", "text");
+        text.append(el("div", "name", name), el("div", "meta", "Installing…"));
+        row.append(el("span", "spinner"), text);
+        list.append(row);
+      }
+      if (!view.state.extensions.length && !xv.installing.length) list.append(el("p", null, "No extensions yet. Add one from the Chrome Web Store: open its page and click Add to Burrow, or paste its link below."));
+      for (const x of view.state.extensions) {
+        const row = el("div", "ext" + (x.enabled ? "" : " off"));
+        const text = el("div", "text");
+        const status = extRunning(x) ? "" : x.enabled ? " · starts after a restart" : " · off";
+        text.append(el("div", "name", x.name), el("div", "meta", `${x.version} · ${x.source === "web_store" ? "Chrome Web Store" : "from a file"}${status}`));
+        text.title = x.description || x.name;
+        row.append(extImage(extIconUrl(x)), text);
+        if (x.options && extRunning(x)) {
+          const opts = el("button", "link", "Options");
+          opts.onclick = () => (act("open_url", { url: `chrome-extension://${x.id}/${x.options}` }), closeDialog());
+          row.append(opts);
+        }
+        const toggle = el("input");
+        toggle.type = "checkbox";
+        toggle.checked = x.enabled;
+        toggle.title = x.enabled ? "Turn off" : "Turn on";
+        toggle.onchange = () => act("set_extension_enabled", { id: x.id, enabled: toggle.checked });
+        const remove = icon("close", "act");
+        remove.title = "Remove";
+        remove.onclick = () => {
+          if (remove.classList.contains("sure")) act("remove_extension", { id: x.id });
+          else (remove.classList.add("sure"), (remove.title = "Click again to remove " + x.name));
+        };
+        row.append(toggle, remove);
+        list.append(row);
+      }
+    };
+    fill();
+    dialogRefresh = fill;
+    const input = el("input");
+    input.placeholder = "Chrome Web Store link or extension id";
+    const shown = view.shown ? findTab(view.shown) : null;
+    if (shown && webStoreId(shown.url)) input.value = shown.url;
+    const add = el("button", "btn primary", "Add");
+    add.onclick = () => {
+      if (!input.value.trim()) return input.focus();
+      act("install_extension", { input: input.value.trim() });
+      input.value = "";
+    };
+    const form = el("div", "ext-form");
+    form.append(input, add);
+    d.append(form);
+    d.onkeydown = (e) => e.key === "Enter" && e.target === input && add.click();
+    const more = el("div", "buttons left");
+    const folder = el("button", "btn", "From a Folder…");
+    folder.onclick = () => act("choose_extension_file", { folder: true });
+    const file = el("button", "btn", "From a .crx File…");
+    file.onclick = () => act("choose_extension_file", { folder: false });
+    const update = el("button", "btn", "Check for Updates");
+    update.onclick = () => act("update_extensions");
+    more.append(folder, file, update);
+    d.append(more);
+    const row = el("div", "buttons");
+    const ok = el("button", "btn primary", "Done");
+    ok.onclick = closeDialog;
+    row.append(ok);
+    d.append(row);
+  });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Resizing the sidebar by its right edge (D-033)
+
+const SIDEBAR_DEFAULT_WIDTH = 264;
+const handle = $("resize-handle");
+let resizing = null; // { x, width, last, frame } while dragging
+handle.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  handle.setPointerCapture(e.pointerId);
+  resizing = { x: e.screenX, width: window.innerWidth, last: null, frame: 0 };
+  busy++;
+  document.body.classList.add("resizing");
+});
+handle.addEventListener("pointermove", (e) => {
+  if (!resizing) return;
+  resizing.last = Math.round(resizing.width + e.screenX - resizing.x);
+  // At most one resize per frame; Rust lays the window out for each.
+  if (!resizing.frame) {
+    resizing.frame = requestAnimationFrame(() => {
+      if (!resizing) return;
+      resizing.frame = 0;
+      act("set_sidebar_width", { width: resizing.last, save: false });
+    });
+  }
+});
+function endResize() {
+  if (!resizing) return;
+  cancelAnimationFrame(resizing.frame);
+  if (resizing.last !== null) act("set_sidebar_width", { width: resizing.last, save: true });
+  resizing = null;
+  busy--;
+  document.body.classList.remove("resizing");
+  if (pendingRender) render();
+}
+handle.addEventListener("pointerup", endResize);
+handle.addEventListener("lostpointercapture", endResize);
+handle.addEventListener("dblclick", () => act("set_sidebar_width", { width: SIDEBAR_DEFAULT_WIDTH, save: true }));
+
+// ---------------------------------------------------------------------------------------------
 // Toast
 
 let toastTimer = null;
@@ -1339,6 +1570,10 @@ $("btn-close").onclick = () => act("window_close");
 $("toolbar").ondblclick = (e) => e.target === $("toolbar") && act("window_maximize");
 $("btn-back").onclick = () => act("back");
 $("btn-forward").onclick = () => act("forward");
+$("btn-extensions").onclick = (e) => {
+  if (view && view.extensions.popup) return act("close_extension_popup");
+  extensionsMenu(e);
+};
 $("btn-reload").onclick = () => act(view && view.shown && view.live[view.shown]?.loading ? "stop" : "reload");
 $("new-tab").onclick = () => window.burrow.focusInput(true);
 $("btn-clear").onclick = () => cmd("clear_today");

@@ -107,14 +107,12 @@ pub fn load(path: &Path) -> History {
 
 /// Writes history atomically, like `store::save`.
 pub fn save(path: &Path, history: &History) -> io::Result<()> {
-    if let Some(dir) = path.parent() {
-        fs::create_dir_all(dir)?;
-    }
-    let json = serde_json::to_string(history).map_err(io::Error::other)?;
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    fs::write(&tmp, json)?;
-    fs::rename(&tmp, path)
+    crate::store::write_atomic(path, &encode(history)?)
+}
+
+/// History as it is saved.
+pub fn encode(history: &History) -> io::Result<String> {
+    serde_json::to_string(history).map_err(io::Error::other)
 }
 
 #[cfg(test)]

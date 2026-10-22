@@ -63,8 +63,7 @@ impl Icons {
     }
 
     pub(super) fn view(&self) -> IconsView<'_> {
-        let dir = paths::favicons_dir().to_string_lossy().replace('\\', "/");
-        let base = if dir.starts_with('/') { format!("file://{dir}/") } else { format!("file:///{dir}/") };
+        let base = format!("{}://icons/", crate::scheme::SCHEME);
         let files = self.saved.iter().map(|(h, v)| (h.as_str(), format!("{}?v={v}", favicon::file_name(h)))).collect();
         IconsView { base, files }
     }

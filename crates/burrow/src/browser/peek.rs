@@ -106,6 +106,7 @@ impl Burrow {
     }
 
     fn show_peek(&mut self, view: BrowserView, profile_id: Id, source_tab: Option<Id>, url: String) -> Option<()> {
+        self.close_extension_popup();
         let window = self.window.clone()?;
         let frame = panel_create(None)?;
         // The card's 1px inset shows its color as a border around the page.

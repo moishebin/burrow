@@ -10,6 +10,7 @@ Open-source Arc-style browser: Rust + CEF (cef-rs), Windows first, developed in 
 - CEF callbacks must not touch the controller directly: use `browser::later(...)` (D-009). The only synchronous `browser::with` calls are ones where CEF needs an answer now (`can_close`, `is_frameless`, popups, permissions).
 - Text from web pages goes into the sidebar with `textContent`, never `innerHTML`.
 - Agent tools (D-018): model-only tools go in `burrow_core::agent`; page tools in `crates/burrow/src/browser/tools.rs`. Agents must not disturb the user: open in the background unless asked to focus.
+- **Every feature gets agent support in the same change.** Anything the owner can do in the UI, an agent must be able to do through a tool (the owner's rule, D-028). Add or extend a tool, test it (`burrow --agent …`), and list it in the README's Agents section.
 
 ## Dev loop (D-012)
 

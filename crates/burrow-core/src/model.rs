@@ -6,6 +6,8 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
+use crate::extensions::Extension;
+
 pub type Id = String;
 
 pub fn new_id() -> Id {
@@ -37,6 +39,9 @@ pub struct State {
     /// Boosts: the user's own CSS for a host, added to every page of it.
     #[serde(default)]
     pub boosts: BTreeMap<String, String>,
+    /// Installed Chrome extensions (D-032).
+    #[serde(default)]
+    pub extensions: Vec<Extension>,
 }
 
 /// One Air Traffic Control rule (D-021).
@@ -92,6 +97,22 @@ pub struct Settings {
     /// its own site (Arc's behaviour, D-022).
     #[serde(default = "yes")]
     pub peek_from_pinned: bool,
+    /// The sidebar's width in DIPs, set by dragging its right edge (D-033).
+    #[serde(default = "default_sidebar_width")]
+    pub sidebar_width: u32,
+}
+
+pub const SIDEBAR_WIDTH_DEFAULT: u32 = 264;
+pub const SIDEBAR_WIDTH_MIN: u32 = 200;
+pub const SIDEBAR_WIDTH_MAX: u32 = 600;
+
+fn default_sidebar_width() -> u32 {
+    SIDEBAR_WIDTH_DEFAULT
+}
+
+/// A sidebar width the window can show: between the limits, whatever was asked for.
+pub fn clamp_sidebar_width(width: i64) -> u32 {
+    width.clamp(SIDEBAR_WIDTH_MIN as i64, SIDEBAR_WIDTH_MAX as i64) as u32
 }
 
 fn yes() -> bool {
@@ -111,6 +132,7 @@ impl Default for Settings {
             agent_page_access: true,
             peek_new_tabs: true,
             peek_from_pinned: true,
+            sidebar_width: SIDEBAR_WIDTH_DEFAULT,
         }
     }
 }
@@ -253,6 +275,7 @@ impl Default for State {
             routes: Vec::new(),
             zoom: BTreeMap::new(),
             boosts: BTreeMap::new(),
+            extensions: Vec::new(),
             profiles: vec![profile],
             spaces: vec![space],
         }

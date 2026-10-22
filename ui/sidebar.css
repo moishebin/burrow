@@ -51,7 +51,7 @@ svg { display: block; flex: none; }
 .lock.on { display: block; }
 
 /* ---- favorites ---- */
-#favorites { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-bottom: 12px; min-height: 4px; }
+#favorites { display: grid; grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); gap: 7px; margin-bottom: 12px; min-height: 4px; }
 #favorites:empty { margin-bottom: 4px; }
 .fav {
   height: 46px; border-radius: 10px; background: var(--tile); display: grid; place-items: center; position: relative;
@@ -289,3 +289,34 @@ body.collapsed { background: var(--space); }
 .history .label .u { font-size: 11px; color: var(--ink-soft); }
 .history .act { visibility: hidden; }
 .history .row:hover .act { visibility: visible; }
+
+/* ---- resizing (D-033) ---- */
+#resize-handle {
+  position: fixed; top: 0; right: 0; bottom: 0; width: 6px; z-index: 6; cursor: col-resize; app-region: no-drag;
+}
+#resize-handle:hover, body.resizing #resize-handle { background: linear-gradient(90deg, transparent 2px, rgba(31, 29, 43, 0.18) 2px, rgba(31, 29, 43, 0.18) 4px, transparent 4px); }
+body.collapsed #resize-handle { display: none; }
+body.resizing, body.resizing * { cursor: col-resize !important; }
+
+/* ---- extensions (D-032) ---- */
+#menu .item .mimg { width: 16px; height: 16px; flex: none; object-fit: contain; }
+#menu .item .ico { width: 16px; height: 16px; display: grid; place-items: center; color: var(--ink-soft); flex: none; }
+#btn-extensions.on { background: var(--pressed); color: var(--ink); }
+.ext-list { display: flex; flex-direction: column; gap: 2px; max-height: 260px; overflow-y: auto; }
+.ext { display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 8px; border-radius: 8px; background: rgba(0, 0, 0, 0.04); }
+.ext img, .ext .ico { width: 20px; height: 20px; flex: none; object-fit: contain; color: var(--ink-soft); display: grid; place-items: center; }
+.ext .text { flex: 1; min-width: 0; }
+.ext .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ext .meta { font-size: 11px; color: var(--ink-soft); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ext.off .name { color: var(--ink-soft); }
+#dialog .ext input[type=checkbox] { margin: 0; padding: 0; width: auto; flex: none; }
+.ext .link { font-size: 11px; color: var(--drop); flex: none; }
+.ext .act { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; color: var(--ink-soft); flex: none; }
+.ext .act:hover { background: rgba(0, 0, 0, 0.08); color: var(--ink); }
+.ext .act.sure { background: #c4314b; color: #fff; }
+.ext-form { display: flex; gap: 6px; }
+.ext-form input { flex: 1; min-width: 0; }
+#dialog .buttons.left { justify-content: flex-start; flex-wrap: wrap; }
+.notice { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: rgba(79, 70, 229, 0.08); font-size: 12px; }
+.notice span { flex: 1; }
+.notice .btn.primary { flex: none; }

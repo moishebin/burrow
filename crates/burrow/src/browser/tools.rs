@@ -71,6 +71,9 @@ impl Burrow {
         if tool == "open_tab" {
             return self.agent_open_tab(&args, done);
         }
+        if tool == "extensions" {
+            return self.agent_extensions(&args, done);
+        }
         if let Some(result) = self.app_tool(tool, &args) {
             return done(self, result);
         }
@@ -227,6 +230,18 @@ impl Burrow {
                 }
                 Ok(json!({ "zoom": percent.clamp(25.0, 500.0) }))
             }),
+            "sidebar" => {
+                if let Some(w) = args.get("width").and_then(Value::as_i64) {
+                    self.set_sidebar_width(w);
+                    self.changed();
+                }
+                if let Some(v) = args.get("visible").and_then(Value::as_bool)
+                    && v != self.sidebar_visible
+                {
+                    self.toggle_sidebar();
+                }
+                Ok(json!({ "width": self.state.settings.sidebar_width, "visible": self.sidebar_visible }))
+            }
             "mute_tab" => tab().and_then(|t| {
                 let muted = args.get("muted").and_then(Value::as_bool).ok_or("missing argument `muted`")?;
                 if !self.set_muted(&t, muted) {
@@ -422,6 +437,11 @@ impl Burrow {
         if live.devtools.is_none() {
             live.devtools = host.add_dev_tools_message_observer(Some(&mut clients::AgentDevTools::new()));
         }
+        self.send_devtools(&host, method, params, done);
+    }
+
+    /// Sends one DevTools call to any browser that has an `AgentDevTools` observer.
+    pub(super) fn send_devtools(&mut self, host: &BrowserHost, method: &str, params: Value, done: Done) {
         let id = self.next_devtools_id;
         self.next_devtools_id += 1;
         let message = json!({ "id": id, "method": method, "params": params }).to_string();

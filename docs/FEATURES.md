@@ -1,7 +1,7 @@
 # Features: needed vs implemented
 
 Legend: ✅ done · 🟡 partial · ⬜ not started · 💤 deferred
-Priority: **P0** = needed before the owner can switch from Arc · P1 = soon after · P2 = later
+Priority: **P0** = needed to switch from Arc · P1 = soon after · P2 = later
 "Verified" means checked in the running Windows build via DevTools (D-012), not only unit-tested.
 
 ## P0: must have to replace Arc daily
@@ -30,7 +30,7 @@ Priority: **P0** = needed before the owner can switch from Arc · P1 = soon afte
 | Camera / mic / notification permission prompts | ✅ | D-014. Verified the allow-and-remember flow. |
 | Page context menu: open link in new tab, copy link, search | ✅ | D-014 |
 | App icon (window/taskbar) | ✅ | `scripts/make-icon.py` |
-| Site icons for every tab, also never-loaded ones | ✅ | D-025. Saved on disk; found from the page's `<link rel=icon>`. Verified on Xvfb (fixed the owner's globe-icon report). |
+| Site icons for every tab, also never-loaded ones | ✅ | D-025. Saved on disk; found from the page's `<link rel=icon>`. Verified on Xvfb (fixed a reported globe-icon bug). |
 
 ## P1
 
@@ -48,14 +48,15 @@ Priority: **P0** = needed before the owner can switch from Arc · P1 = soon afte
 | Find in page (Ctrl+F) | ✅ | D-014 |
 | Auto-archive Today tabs (default 12h) + Recently Closed + Ctrl+Shift+T | ✅ | Unit-tested |
 | Keyboard shortcuts (see README) | ✅ | Verified with real keys on Xvfb: Ctrl+T/W/D/F, Ctrl+Shift+T, Esc |
-| Sidebar collapse (Ctrl+S) + hover the left edge to peek | ✅ | Verified with real input on Xvfb. A hidden sidebar used to leave no way back (reported by the owner, D-016). |
+| Sidebar collapse (Ctrl+S) + hover the left edge to peek | ✅ | Verified with real input on Xvfb. A hidden sidebar used to leave no way back (reported in use, D-016). |
+| Resizable sidebar (drag the right edge) | ✅ | D-033. 200–600 px, saved; double-click resets. Verified with a real drag on Xvfb. Agent tool `sidebar`. |
 | Space colors, icons, rename, delete | ✅ | |
 | Search engine setting | ✅ | Default Google (D-011) |
 | Favicon cache on disk (show icons for never-loaded tabs offline) | ✅ | D-025 |
 | Command bar with history search | ✅ | Address box: open tabs, then history (D-023) |
 | Peek / little browser for links from pinned tabs | ✅ | D-022 |
 | Split view | ✅ | Two tabs (D-026). Not resizable yet. |
-| Password saving / autofill | ⬜ | Alloy has no password UI (D-010). Likely a built-in manager or an extension later. |
+| Password saving / autofill | 🟡 | Alloy has no built-in password UI (D-010). A password manager extension works (Bitwarden's popup verified, D-032); no built-in manager. |
 | Default-browser registration on Windows | 🟡 | D-024. + → Make Burrow Your Default Browser… writes per-user registry entries and opens Settings. Links hand over to a running Burrow (verified on Linux, and on Windows with the 0.0.2 installer, D-031). The registry part isn't checked by hand yet. |
 | Installer + auto-update | 🟡 | Windows setup .exe: per-user, Start menu, *Settings → Apps* uninstall, updates in place (D-030). Verified install/upgrade/uninstall on Windows. Zip and Linux archive too (D-020); the zip runs on a clean PC (D-029). Not code-signed yet (ready via `BURROW_SIGN`); no auto-update yet. |
 | Launching Burrow again focuses the running window | ✅ | D-029. Verified on Windows: restores a minimized window, no second window. |
@@ -69,7 +70,7 @@ Priority: **P0** = needed before the owner can switch from Arc · P1 = soon afte
 
 | Feature | Status | Notes |
 |---|---|---|
-| Chrome extensions (password managers first) | 💤 | Owner said "not now" (2026-10-22). Alloy has limited extension support (D-010). |
+| Chrome extensions | 🟡 | D-032. Install from the Chrome Web Store ("Add to Burrow" on a store page, or a link), a folder or a `.crx`; puzzle button opens popups; on/off, remove, update; changes need a restart (offered). Verified on Xvfb (Bitwarden, Dark Reader, uBlock Origin Lite) and on Windows. Missing: toolbar badges, extension context menus and shortcuts, `chrome.tabs`/`windows` from extension backgrounds, auto-update. Agent tool `extensions`. |
 | Built-in ad blocker | 💤 | |
 | macOS / Linux packages | 🟡 | Linux `.tar.gz` since 0.0.1 (D-020). macOS needs a Mac to build (app bundle, signing). |
 | Sync between machines | 💤 | |

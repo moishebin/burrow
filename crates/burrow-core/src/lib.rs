@@ -3,6 +3,7 @@
 
 pub mod agent;
 pub mod commands;
+pub mod extensions;
 pub mod favicon;
 pub mod history;
 pub mod import_arc;

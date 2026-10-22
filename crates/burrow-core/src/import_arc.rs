@@ -103,6 +103,7 @@ pub fn import_arc_sidebar(json: &str) -> Result<ImportedArc, ImportError> {
         routes: Vec::new(),
         zoom: Default::default(),
         boosts: Default::default(),
+        extensions: Vec::new(),
         profiles,
         spaces,
     };

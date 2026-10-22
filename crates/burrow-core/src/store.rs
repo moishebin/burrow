@@ -33,12 +33,22 @@ pub fn load(path: &Path) -> io::Result<State> {
 
 /// Writes the state atomically: to a temp file next to it, then renamed over it.
 pub fn save(path: &Path, state: &State) -> io::Result<()> {
+    write_atomic(path, &encode(state)?)
+}
+
+/// The state as it is saved, so it can be written elsewhere (e.g. on another thread).
+pub fn encode(state: &State) -> io::Result<String> {
+    serde_json::to_string_pretty(state).map_err(io::Error::other)
+}
+
+/// Writes `contents` to a temp file next to `path`, then renames it over `path`, so a crash
+/// mid-write leaves the old file intact.
+pub fn write_atomic(path: &Path, contents: &str) -> io::Result<()> {
     if let Some(dir) = path.parent() {
         fs::create_dir_all(dir)?;
     }
-    let json = serde_json::to_string_pretty(state).map_err(io::Error::other)?;
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
-    fs::write(&tmp, json)?;
+    fs::write(&tmp, contents)?;
     fs::rename(&tmp, path)
 }

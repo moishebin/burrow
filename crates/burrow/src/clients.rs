@@ -131,7 +131,10 @@ wrap_keyboard_handler! {
                 && e.windows_key_code == VK_ESCAPE
                 && e.type_ == KeyEventType::RAWKEYDOWN
                 && e.modifiers & (SHIFT | CTRL | ALT) == 0
-                && (browser::is_peek_browser(b.identifier()) || browser::Burrow::peek_open() || browser::page_fullscreen())
+                && (browser::is_peek_browser(b.identifier())
+                    || browser::is_popup_browser(b.identifier())
+                    || browser::Burrow::peek_open()
+                    || browser::page_fullscreen())
             {
                 browser::later(|b| b.shortcut(Shortcut::Escape));
                 return 1;
@@ -380,6 +383,43 @@ wrap_display_handler! {
             let Some(id) = id_of(browser) else { return };
             let Some(url) = icon_urls.and_then(|l| l.clone().into_iter().next()) else { return };
             browser::later(move |b| b.on_favicon(id, url));
+        }
+
+        /// Messages from extensions (D-032): Burrow's helper names a tab's extension id, and an
+        /// extension popup asks Burrow to open a tab. Only the popup's own page can log to its
+        /// console; web pages can't reach it.
+        fn on_console_message(
+            &self,
+            browser: Option<&mut Browser>,
+            _level: LogSeverity,
+            message: Option<&CefString>,
+            _source: Option<&CefString>,
+            _line: ::std::os::raw::c_int,
+        ) -> ::std::os::raw::c_int {
+            let Some(id) = id_of(browser) else { return 0 };
+            let msg = string(message);
+            if let Some(tab) = browser::helper_tab_id(&msg) {
+                browser::later(move |b| b.on_extension_tab_id(id, tab));
+                return 1;
+            }
+            if !browser::is_popup_browser(id) {
+                return 0;
+            }
+            let Some(json) = msg.strip_prefix(browser::POPUP_PREFIX) else { return 0 };
+            let json = json.to_string();
+            browser::later(move |b| b.on_extension_popup_message(id, &json));
+            1
+        }
+
+        /// An extension popup's page wants another size (auto-resize is on only for popups).
+        fn on_auto_resize(&self, browser: Option<&mut Browser>, new_size: Option<&Size>) -> ::std::os::raw::c_int {
+            let (Some(id), Some(size)) = (id_of(browser), new_size) else { return 0 };
+            if !browser::is_popup_browser(id) {
+                return 0;
+            }
+            let size = size.clone();
+            browser::later(move |b| b.on_extension_popup_resized(id, size));
+            1
         }
 
         /// A page (usually a video) entered or left fullscreen. Burrow makes the window

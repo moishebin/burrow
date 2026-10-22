@@ -296,6 +296,34 @@ pub const TOOLS: &[Tool] = &[
         schema: || object(json!({ "tab_id": tab_id(), "muted": { "type": "boolean" } }), &["tab_id", "muted"]),
     },
     Tool {
+        name: "sidebar",
+        description: "Get or change the sidebar: its width in pixels (200–600, the same as dragging its right edge) and whether it is shown. Change it only when the user asks. With no arguments, just reports.",
+        schema: || {
+            object(
+                json!({
+                    "width": { "type": "integer", "minimum": 200, "maximum": 600, "description": "Default width is 264." },
+                    "visible": { "type": "boolean", "description": "false hides it to an edge strip (Ctrl+S)." }
+                }),
+                &[],
+            )
+        },
+    },
+    Tool {
+        name: "extensions",
+        description: "Chrome extensions. list = installed ones (running = loaded now); install = from the Chrome Web Store (web_store: a store link or id) or from disk (path: a folder, .crx or .zip); update = fetch newer Web Store versions (all, or one extension); enable / disable / remove one; open = show its popup over the tab the user is on (only when asked: the user sees it), close = close it; restart = restart Burrow, which installs, updates, removals and on/off changes need (only when the user agrees: it reloads every tab). Extensions run in every space, each with its own storage.",
+        schema: || {
+            object(
+                json!({
+                    "action": { "type": "string", "enum": ["list", "install", "update", "enable", "disable", "remove", "open", "close", "restart"], "description": "Default list." },
+                    "web_store": { "type": "string", "description": "For install: a chromewebstore.google.com link or an extension id." },
+                    "path": { "type": "string", "description": "For install: an unpacked extension's folder, or a .crx/.zip file." },
+                    "extension": { "type": "string", "description": "An installed extension's id or name." }
+                }),
+                &[],
+            )
+        },
+    },
+    Tool {
         name: "read_page",
         description: "Read a tab's page, loading it first if needed: its visible text, its HTML, or a numbered list of links, buttons and form fields (with CSS selectors to use with click/type_text). Works on any tab, not just the shown one.",
         schema: || {
@@ -390,7 +418,7 @@ pub fn tools_json() -> Value {
     )
 }
 
-/// Tools that look inside or act on a page. The owner can turn these off; tab and space tools
+/// Tools that look inside or act on a page. The user can turn these off; tab and space tools
 /// always work (D-019).
 pub const PAGE_TOOLS: &[&str] = &["read_page", "screenshot", "click", "type_text", "press_key", "wait_for", "eval_js"];
 

@@ -34,12 +34,20 @@ pub fn profile_dir(profile_id: &str) -> PathBuf {
     data_dir().join("profiles").join(profile_id)
 }
 
+/// Installed Chrome extensions, one folder per extension id (D-032).
+pub fn extensions_dir() -> PathBuf {
+    data_dir().join("extensions")
+}
+
 /// The sidebar's HTML lives in `ui/` next to the executable.
-pub fn ui_url(page: &str) -> String {
+pub fn ui_dir() -> PathBuf {
     let exe = std::env::current_exe().unwrap_or_default();
-    let dir = exe.parent().map(|p| p.join("ui")).unwrap_or_else(|| PathBuf::from("ui"));
-    let path = dir.join(page).to_string_lossy().replace('\\', "/");
-    if path.starts_with('/') { format!("file://{path}") } else { format!("file:///{path}") }
+    exe.parent().map(|p| p.join("ui")).unwrap_or_else(|| PathBuf::from("ui"))
+}
+
+/// A sidebar page, served from `ui_dir()` over `burrow://` (D-032).
+pub fn ui_url(page: &str) -> String {
+    format!("{}://ui/{page}", crate::scheme::SCHEME)
 }
 
 /// Arc's sidebar file on Windows, if Arc is installed.
