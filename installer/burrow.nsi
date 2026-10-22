@@ -1,4 +1,4 @@
-; Burrow's Windows installer (D-027). Built by scripts/package.sh, which passes:
+; Burrow's Windows installer (D-030). Built by scripts/package.sh, which passes:
 ;   VERSION     e.g. 0.0.1
 ;   SRCDIR      the staged Burrow/ folder (exe, CEF runtime, ui/)
 ;   UNLIST      a generated .nsh that deletes exactly the installed files

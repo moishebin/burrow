@@ -31,7 +31,7 @@ wrap_browser_process_handler! {
         }
 
         // Burrow started again (e.g. from a shortcut) while running. Returning 0 makes CEF open a
-        // plain Chromium window; Burrow keeps one window, so bring it forward instead (D-026).
+        // plain Chromium window; Burrow keeps one window, so bring it forward instead (D-029).
         fn on_already_running_app_relaunch(
             &self,
             _command_line: Option<&mut CommandLine>,

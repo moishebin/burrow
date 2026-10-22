@@ -8,7 +8,7 @@
 # Each archive holds a Burrow/ folder: the executable, the CEF runtime, ui/, and the licenses.
 # Windows also gets a setup .exe (per-user installer). macOS isn't built here: it needs a Mac.
 #
-# Code signing (D-027): set BURROW_SIGN to a command that signs the file given as its argument
+# Code signing (D-030): set BURROW_SIGN to a command that signs the file given as its argument
 # in place, e.g. BURROW_SIGN=scripts/sign.sh. It signs burrow.exe, the setup and the uninstaller.
 set -euo pipefail
 
@@ -36,7 +36,7 @@ stage() { # <build dir> <exe name> <extra rsync includes…>
   mv "$dir/CREDITS.html" "$dir/CEF-CHROMIUM-CREDITS.html"
 }
 
-# The Windows setup .exe, from the staged folder (installer/burrow.nsi, D-027). NSIS is unpacked
+# The Windows setup .exe, from the staged folder (installer/burrow.nsi, D-030). NSIS is unpacked
 # into ~/.local/nsis (`apt-get download nsis nsis-common` + `dpkg-deb -x`; no root needed).
 installer() {
   local nsis="$HOME/.local/nsis/usr"

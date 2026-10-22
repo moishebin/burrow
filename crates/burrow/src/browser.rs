@@ -862,7 +862,7 @@ impl Burrow {
         self.push_state();
     }
 
-    /// Burrow was launched again while running: show this window instead of opening another (D-026).
+    /// Burrow was launched again while running: show this window instead of opening another (D-029).
     pub fn bring_to_front(&mut self) {
         let Some(w) = &self.window else { return };
         if w.is_minimized() != 0 {

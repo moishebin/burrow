@@ -174,7 +174,7 @@ Releases are GitHub releases tagged `v<version>`, with the archives attached. Th
 
 **Verified.** The Linux archive was extracted and run on Xvfb (sidebar, a page, and agent tools). The Windows archive has the same runtime files as the working per-user install. The packaged Windows build wasn't launched, because the owner's own Burrow was running.
 
-## D-026 · Windows package runs on a clean PC; a second launch focuses the window (2026-10-22)
+## D-029 · Windows package runs on a clean PC; a second launch focuses the window (2026-10-22)
 
 **Context.** The 0.0.1 Windows archive had never been launched. Checking it as a downloaded package found two problems:
 1. `burrow.exe` imported `VCRUNTIME140.dll` (the Visual C++ Redistributable), which the archive doesn't include. Most PCs have it from other apps, but a clean Windows install may not, and Burrow wouldn't start there.
@@ -191,7 +191,7 @@ Releases are GitHub releases tagged `v<version>`, with the archives attached. Th
 
 **Still open.** The exe isn't code-signed, so SmartScreen warns on first run (needs a certificate). There's no installer, Start menu entry or auto-update for zip users; `scripts/install-win.sh` covers the owner's machine.
 
-## D-027 · A regular Windows installer (NSIS, per-user); signing plugs in later (2026-10-22)
+## D-030 · A regular Windows installer (NSIS, per-user); signing plugs in later (2026-10-22)
 
 **Context.** The owner asked for "a regular install" and for the app to be signed.
 
