@@ -187,12 +187,7 @@ function findFolder(nodes, id) {
 
 function renderToolbar() {
   setIcon($("btn-toggle"), "sidebar");
-  $("window-buttons").hidden = !view.frameless;
   $("agent-badge").hidden = !view.agent_active;
-  setIcon($("btn-min"), "winMin");
-  setIcon($("btn-max"), view.maximized ? "winRestore" : "winMax");
-  $("btn-max").title = view.maximized ? "Restore" : "Maximize";
-  setIcon($("btn-close"), "winClose");
   const nav = (view.shown && view.live[view.shown]) || {};
   const back = $("btn-back"), fwd = $("btn-forward"), reload = $("btn-reload");
   setIcon(back, "back");
@@ -1564,9 +1559,6 @@ document.documentElement.addEventListener("mouseleave", () => {
     act("peek_sidebar", { on: false });
   }
 });
-$("btn-min").onclick = () => act("window_minimize");
-$("btn-max").onclick = () => act("window_maximize");
-$("btn-close").onclick = () => act("window_close");
 $("toolbar").ondblclick = (e) => e.target === $("toolbar") && act("window_maximize");
 $("btn-back").onclick = () => act("back");
 $("btn-forward").onclick = () => act("forward");

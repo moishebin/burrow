@@ -231,16 +231,12 @@ svg { display: block; flex: none; }
 /* ---- frameless window: the toolbar is the title bar ---- */
 #toolbar { app-region: drag; }
 #toolbar button { app-region: no-drag; }
-#window-buttons { display: flex; gap: 0; }
 #agent-badge {
-  font-size: 11px; font-weight: 600; color: #fff; background: var(--drop); border-radius: 9px; padding: 2px 8px; margin-right: 4px;
+  font-size: 11px; font-weight: 600; color: #fff; background: var(--drop); border-radius: 9px; padding: 2px 8px; margin-left: 4px;
   animation: agent-pulse 1.4s ease-in-out infinite;
 }
 #agent-badge[hidden] { display: none; }
 @keyframes agent-pulse { 50% { opacity: 0.55; } }
-#window-buttons[hidden] { display: none; }
-.icon.win { width: 30px; }
-.icon.win.close:hover { background: #c4314b; color: #fff; }
 
 /* While dragging, an empty favorites grid becomes a visible drop target. */
 .drag-active #favorites:empty {

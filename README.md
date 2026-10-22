@@ -74,7 +74,7 @@ cargo test -p burrow-core
 
 ## Agents
 
-AI agents can drive Burrow: open, close, move and pin tabs, set up spaces and folders, and read, screenshot, click and type in **any** tab, even one you aren't looking at. They can also set Boosts, search history, set up split views, Air Traffic Control rules and Peek settings, zoom, mute and duplicate tabs, resize or hide the sidebar, and install, update, turn on or off and open Chrome extensions. They work in the background, so your own tab stays put. A pulsing **Agent** badge in the sidebar shows when one is working, and **+ → Block Agents from Pages** stops agents from reading or using pages (they can still manage tabs and spaces).
+AI agents can drive Burrow: open, close, move and pin tabs, set up spaces and folders, and read, screenshot, click and type in **any** tab, even one you aren't looking at. They can also set Boosts, search history, set up split views, Air Traffic Control rules and Peek settings, zoom, mute and duplicate tabs, resize or hide the sidebar, minimize, maximize or fullscreen the window, and install, update, turn on or off and open Chrome extensions. They work in the background, so your own tab stays put. A pulsing **Agent** badge in the sidebar shows when one is working, and **+ → Block Agents from Pages** stops agents from reading or using pages (they can still manage tabs and spaces).
 
 Add Burrow as an MCP server to your agent. For Claude Code:
 
@@ -94,7 +94,7 @@ burrow --agent read_page '{"tab_id":"…","format":"elements"}'
 burrow --agent screenshot '{"tab_id":"…"}' --out page.png
 ```
 
-Tools: `list_spaces`, `get_space`, `list_tabs`, `open_tab`, `close_tab`, `focus_tab`, `navigate`, `move_tab`, `rename_tab`, `create_folder`, `update_folder`, `create_space`, `update_space`, `delete_space`, `switch_space`, `air_traffic_control`, `split_view`, `duplicate_tab`, `link_settings`, `boost`, `search_history`, `delete_history`, `peek`, `set_zoom`, `mute_tab`, `sidebar`, `extensions`, `read_page`, `screenshot`, `click`, `type_text`, `press_key`, `wait_for`, `eval_js`.
+Tools: `list_spaces`, `get_space`, `list_tabs`, `open_tab`, `close_tab`, `focus_tab`, `navigate`, `move_tab`, `rename_tab`, `create_folder`, `update_folder`, `create_space`, `update_space`, `delete_space`, `switch_space`, `air_traffic_control`, `split_view`, `duplicate_tab`, `link_settings`, `boost`, `search_history`, `delete_history`, `peek`, `set_zoom`, `mute_tab`, `sidebar`, `window`, `extensions`, `read_page`, `screenshot`, `click`, `type_text`, `press_key`, `wait_for`, `eval_js`.
 
 ```sh
 burrow --agent sidebar '{"width":320}'

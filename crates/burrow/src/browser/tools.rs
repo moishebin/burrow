@@ -242,6 +242,33 @@ impl Burrow {
                 }
                 Ok(json!({ "width": self.state.settings.sidebar_width, "visible": self.sidebar_visible }))
             }
+            "window" => {
+                let action = str_arg(args, "action").unwrap_or("status");
+                let Some(w) = self.window.clone() else { return Some(Err("the window isn't open yet".into())) };
+                match action {
+                    "status" => {}
+                    "minimize" => w.minimize(),
+                    "maximize" => w.maximize(),
+                    "restore" => w.restore(),
+                    "fullscreen" | "exit_fullscreen" => {
+                        let on = action == "fullscreen";
+                        if on != self.fullscreen {
+                            self.shortcut(super::Shortcut::Fullscreen);
+                        }
+                    }
+                    "show_buttons" => {
+                        if !self.reveal_window_buttons() {
+                            return Some(Err("the window uses the system title bar, which has its own buttons".into()));
+                        }
+                    }
+                    a => return Some(Err(format!("unknown action `{a}`"))),
+                }
+                Ok(json!({
+                    "maximized": w.is_maximized() != 0,
+                    "minimized": w.is_minimized() != 0,
+                    "fullscreen": self.fullscreen,
+                }))
+            }
             "mute_tab" => tab().and_then(|t| {
                 let muted = args.get("muted").and_then(Value::as_bool).ok_or("missing argument `muted`")?;
                 if !self.set_muted(&t, muted) {

@@ -125,6 +125,25 @@ wrap_browser_view_delegate! {
     }
 }
 
+// Minimize, maximize and close in the window's top-right corner; they show while hovered (D-035).
+wrap_button_delegate! {
+    pub struct WindowButtonDelegate {}
+    impl ViewDelegate {}
+    impl ButtonDelegate {
+        fn on_button_pressed(&self, button: Option<&mut Button>) {
+            let Some(id) = button.map(|b| View::from(&*b).id()) else { return };
+            browser::later(move |b| b.window_button(id));
+        }
+
+        fn on_button_state_changed(&self, button: Option<&mut Button>) {
+            let Some(button) = button else { return };
+            let id = View::from(&*button).id();
+            let hovered = matches!(button.state(), ButtonState::HOVERED | ButtonState::PRESSED);
+            browser::later(move |b| b.window_button_hover(id, hovered));
+        }
+    }
+}
+
 // The buttons in a Peek's header (D-022).
 wrap_button_delegate! {
     pub struct PeekButtonDelegate {}

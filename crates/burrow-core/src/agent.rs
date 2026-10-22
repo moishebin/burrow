@@ -309,6 +309,18 @@ pub const TOOLS: &[Tool] = &[
         },
     },
     Tool {
+        name: "window",
+        description: "Get or change Burrow's window: minimize, maximize, restore, fullscreen on or off, or show_buttons (slides out the minimize/maximize/close buttons in the top-right corner for two seconds, as hovering does). Change it only when the user asks. Default status.",
+        schema: || {
+            object(
+                json!({
+                    "action": { "type": "string", "enum": ["status", "minimize", "maximize", "restore", "fullscreen", "exit_fullscreen", "show_buttons"], "description": "Default status." }
+                }),
+                &[],
+            )
+        },
+    },
+    Tool {
         name: "extensions",
         description: "Chrome extensions. list = installed ones (running = loaded now); install = from the Chrome Web Store (web_store: a store link or id) or from disk (path: a folder, .crx or .zip); update = fetch newer Web Store versions (all, or one extension); enable / disable / remove one; open = show its popup over the tab the user is on (only when asked: the user sees it), close = close it; restart = restart Burrow, which installs, updates, removals and on/off changes need (only when the user agrees: it reloads every tab). Extensions run in every space, each with its own storage.",
         schema: || {

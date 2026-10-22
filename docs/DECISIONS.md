@@ -319,3 +319,27 @@ Releases are GitHub releases tagged `v<version>`, with the archives attached. Th
 **Decision.** Drag the sidebar's right edge (a 6 px handle that shows a line on hover) to set its width, 200–600 px, also never leaving the page less than 320 px. Double-click the edge for the default 264 px. The width is saved in `settings.sidebar_width` and used when the hidden sidebar peeks out. While dragging, the sidebar sends one width per animation frame and Rust lays the window out; it's saved when the mouse is released. The favorites grid now fills the width with as many 68 px+ columns as fit (3 at the default width). Agents: the `sidebar` tool (width, visible).
 
 **Verified** on Linux/Xvfb with a real mouse drag (264 → 403 px, saved) and double-click reset; on Windows through the agent tool.
+
+## D-034 · Performance: saves off the UI thread, fewer sidebar redraws (2026-10-22)
+
+**Context.** A look at where Burrow spends time. Every page event (address, title, icon, loading) re-sends the whole view and the sidebar rebuilds its rows; `state.json` was written on the UI thread 1.5 s after each change and `history.json` (up to 20,000 visits, several MB) every 10 s while browsing.
+
+**Decision.**
+- **Saves** are still serialized on the UI thread (a consistent snapshot, a few ms at most) but written on a background thread (`writer.rs`). Each write gets a version number and holds one lock, so writes never overlap and an older snapshot never replaces a newer one. On shutdown the write happens before returning, as before. `store::write_atomic` is the shared temp-file-then-rename write.
+- **Sidebar.** Renders are drawn once per animation frame, so a burst of views draws only the last. Icons that fail to load are remembered for the session: before, every redraw rebuilt the rows and downloaded the same missing icons (12 broken icon URLs in a real sidebar of about 85 tabs and folders) again. The toolbar's SVG icons are reparsed only when they change.
+
+**Measured** on Linux/Xvfb with that sidebar: one full render takes ~1.6 ms, and loading a page sent 18 views and drew 16, so the sidebar itself was never the bottleneck; the repeated icon downloads and disk writes on the UI thread were the waste.
+
+**Not done.** Idle tabs are never unloaded automatically, so memory grows with every tab opened in a session. Arc-style auto-unloading would change behavior (unsaved form text is lost) and needs a decision first.
+
+## D-035 · Window buttons in the corner, shown on hover; a cleaner sidebar top (2026-10-22)
+
+**Context.** Minimize, maximize and close sat at the right end of the sidebar's toolbar, next to back/forward/reload and the extensions button, which crowded it. A redesign was requested: the buttons on the right, out of sight until the mouse goes there, as in Arc on Windows.
+
+**Decision.**
+- The buttons are native CEF buttons in a window **overlay** (never a window) in the window's **top-right corner**. At rest the overlay is only the 8 px strip above the content card, 138 px wide, painted the space color (the window's own color there) and with no glyphs, so it is invisible and never covers the page. Hovering that strip (CEF's button hover state, `on_button_state_changed`) slides out 46×32 px buttons over the page's corner, Windows-style: Segoe MDL2 Assets glyphs on Windows, a red close on hover. They go back half a second after the mouse leaves them. Not shown in fullscreen, nor with the system title bar.
+- The whole strip above the card is a drag area for moving the window, so it can be moved with the sidebar hidden too.
+- The sidebar's toolbar is now Arc's: the sidebar toggle and extensions (and the Agent badge) on the left, back/forward/reload on the right.
+- Agents: the `window` tool (status, minimize, maximize, restore, fullscreen on/off, show_buttons for two seconds).
+
+**Verified** on Linux/Xvfb with real mouse moves: nothing visible at rest, the buttons appear when the corner is hovered and hide after leaving; the `window` tool shows them.

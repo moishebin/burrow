@@ -19,6 +19,7 @@ mod extensions;
 mod icons;
 mod peek;
 mod tools;
+mod window_buttons;
 
 pub use extensions::{helper_tab_id, is_popup_browser, load_extension_switch, restart_requested, POPUP_PREFIX};
 pub use peek::is_peek_browser;
@@ -243,6 +244,8 @@ pub struct Burrow {
     /// Extensions being downloaded or unpacked, by a running number.
     ext_installs: HashMap<u64, extensions::Install>,
     next_install: u64,
+    /// Minimize, maximize and close in the corner, for the frameless window (D-035).
+    window_buttons: Option<window_buttons::WindowButtons>,
 }
 
 /// Messages from the sidebar that aren't model commands.
@@ -381,6 +384,7 @@ pub fn start() {
             ext_popup: None,
             ext_installs: HashMap::new(),
             next_install: 1,
+            window_buttons: None,
         })
     });
     crate::agent::start_server();
@@ -445,6 +449,7 @@ impl Burrow {
         self.apply_theme();
         self.sync_view();
         window.show();
+        self.create_window_buttons();
         self.archive_tick();
         // Links that started Burrow (Burrow as the default browser).
         for url in crate::external::take_startup_urls() {
@@ -468,6 +473,7 @@ impl Burrow {
             layout.set_flex_for_view(Some(&mut View::from(&self.content)), 1);
         }
         window.layout();
+        self.layout_window_buttons();
     }
 
     /// Archives stale Today tabs now and every ten minutes.
@@ -1070,6 +1076,7 @@ impl Burrow {
             w.layout();
         }
         self.apply_drag_regions();
+        self.layout_window_buttons();
         self.layout_peek();
         self.layout_extension_popup();
     }
@@ -1107,7 +1114,7 @@ impl Burrow {
         }
         let mut origin = Point { x: 0, y: 0 };
         View::from(&self.sidebar).convert_point_to_window(Some(&mut origin));
-        let regions: Vec<DraggableRegion> = if self.sidebar_shown() {
+        let mut regions: Vec<DraggableRegion> = if self.sidebar_shown() {
             self.drag_regions
                 .iter()
                 .map(|(r, drag)| DraggableRegion {
@@ -1118,11 +1125,21 @@ impl Burrow {
         } else {
             vec![]
         };
+        // The strip above the card moves the window too, also with the sidebar hidden; the
+        // corner belongs to the window buttons.
+        if !self.fullscreen {
+            let card = View::from(&self.content).bounds();
+            regions.push(DraggableRegion {
+                bounds: Rect { x: 0, y: 0, width: (card.x + card.width - 3 * 46).max(0), height: consts::CARD_MARGIN },
+                draggable: 1,
+            });
+        }
         w.set_draggable_regions(Some(&regions));
     }
 
     pub fn on_window_resized(&mut self) {
         self.apply_drag_regions();
+        self.layout_window_buttons();
         self.layout_peek();
         self.layout_extension_popup();
         self.push_state();
@@ -1283,6 +1300,7 @@ impl Burrow {
             };
             w.set_title(Some(&cef(&title)));
         }
+        self.layout_window_buttons();
     }
 
     // ---- Keyboard ---------------------------------------------------------------------------
