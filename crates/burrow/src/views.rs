@@ -115,6 +115,17 @@ wrap_browser_view_delegate! {
     }
 }
 
+// The dialog overlay (D-039): sized by its overlay.
+wrap_browser_view_delegate! {
+    pub struct OverlayViewDelegate {}
+    impl ViewDelegate {}
+    impl BrowserViewDelegate {
+        fn browser_runtime_style(&self) -> RuntimeStyle {
+            RuntimeStyle::ALLOY
+        }
+    }
+}
+
 wrap_browser_view_delegate! {
     // `fills`: tabs and Peeks take the size their layout gives them. Their natural width would
     // skew a split view's shares, since a box layout shares out the difference from it (D-038).

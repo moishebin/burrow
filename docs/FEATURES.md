@@ -28,6 +28,7 @@ Priority: **P0** = needed to switch from Arc · P1 = soon after · P2 = later
 | Downloads (to ~/Downloads, list in sidebar, click to open) | ✅ | Verified |
 | Look and feel: space-tinted sidebar, content card, frameless window | ✅ | D-013. Dragging and resizing the frameless window not yet checked by hand. |
 | Window buttons hidden in the top-right corner until hovered (Arc for Windows) | ✅ | D-035. Verified on Xvfb with real mouse moves. Agent tool `window`. |
+| Dialogs (History, Extensions, Air Traffic Control, settings…) centered over the window | ✅ | D-039. Were squeezed into the sidebar. Verified on Xvfb with real input. |
 | Picture in picture for every video; auto when leaving a playing tab (Arc) | ✅ | D-036. Chromium's own floating window. Verified on Xvfb: auto on tab switch, back on return, "back to tab", close, Ctrl+Shift+P. Videos inside iframes not yet. Agent tool `picture_in_picture`. |
 | Camera / mic / notification permission prompts | ✅ | D-014. Verified the allow-and-remember flow. |
 | Page context menu: open link in new tab, copy link, search | ✅ | D-014 |

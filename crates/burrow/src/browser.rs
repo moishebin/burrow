@@ -18,6 +18,7 @@ use crate::{clients, consts, paths, task, views, writer};
 mod divider;
 mod extensions;
 mod icons;
+mod modal;
 mod peek;
 mod pip;
 mod tools;
@@ -25,6 +26,7 @@ mod update;
 mod window_buttons;
 
 pub use extensions::{helper_tab_id, is_popup_browser, load_extension_switch, restart_requested, POPUP_PREFIX};
+pub use modal::dialog_open;
 pub use peek::is_peek_browser;
 pub use pip::BINDING as PIP_BINDING;
 pub use update::run_pending_install;
@@ -256,6 +258,8 @@ pub struct Burrow {
     updater: update::Updater,
     /// The split view's divider, made the first time a split shows (D-038).
     divider: Option<divider::Divider>,
+    /// Dialogs over the whole window (D-039).
+    modal: Option<modal::Modal>,
 }
 
 /// Messages from the sidebar that aren't model commands.
@@ -331,6 +335,13 @@ enum Act {
     SplitDrag { dx: f64, phase: String },
     /// Double-click on the divider: equal halves.
     SplitReset,
+    /// Show one of the sidebar's dialogs over the window (D-039); `args` go to its function.
+    OpenDialog { name: String, #[serde(default)] args: serde_json::Value },
+    CloseDialog,
+    /// The dialog was clicked: typing goes there now.
+    FocusDialog,
+    /// The dialog overlay's page has loaded.
+    ModalReady,
 }
 
 /// Starts Burrow: loads the state and creates the main window. Called once, on the UI thread.
@@ -409,6 +420,7 @@ pub fn start() {
             pip_tab: None,
             updater: Default::default(),
             divider: None,
+            modal: None,
         })
     });
     crate::agent::start_server();
@@ -544,7 +556,7 @@ impl Burrow {
             if let Some(host) = self.sidebar.browser().and_then(|b| b.host()) {
                 host.close_browser(1);
             }
-            if let Some(b) = self.divider_browser() {
+            for b in [self.divider_browser(), self.modal_browser()].into_iter().flatten() {
                 self.dying_peeks.push(b.identifier());
                 if let Some(host) = b.host() {
                     host.close_browser(1);
@@ -710,7 +722,9 @@ impl Burrow {
             Act::HistoryList { query } => {
                 let hits = self.history.search(&query, 300, now_ms());
                 let json = serde_json::to_string(&hits).unwrap_or_default();
-                self.run_in_sidebar(&format!("window.burrow && burrow.history({}, {json})", js_string(&query)));
+                let js = format!("window.burrow && burrow.history({}, {json})", js_string(&query));
+                self.run_in_sidebar(&js);
+                self.run_in_modal(js);
             }
             Act::DeleteHistory { url } => {
                 self.history.remove(&url);
@@ -798,6 +812,13 @@ impl Burrow {
             }
             Act::SplitDrag { dx, phase } => self.split_drag(dx, &phase),
             Act::SplitReset => self.set_split_ratio(0.5, true),
+            Act::OpenDialog { name, args } => {
+                let args = if args.is_array() { args } else { serde_json::json!([]) };
+                self.open_dialog(&name, &args);
+            }
+            Act::CloseDialog => self.close_modal(),
+            Act::FocusDialog => self.focus_modal(),
+            Act::ModalReady => self.on_modal_ready(),
         }
     }
 
@@ -1205,6 +1226,7 @@ impl Burrow {
 
     pub fn on_window_resized(&mut self) {
         self.apply_drag_regions();
+        self.layout_modal();
         self.layout_window_buttons();
         self.layout_peek();
         self.layout_extension_popup();
@@ -1385,7 +1407,9 @@ impl Burrow {
                 }
             }
             Shortcut::Escape => {
-                if self.ext_popup.is_some() {
+                if self.modal_open() {
+                    self.close_modal();
+                } else if self.ext_popup.is_some() {
                     self.close_extension_popup();
                 } else if self.peek.is_some() {
                     self.close_peek();
@@ -1405,13 +1429,7 @@ impl Burrow {
                 }
             }
             Shortcut::Print => self.act(Act::Print),
-            Shortcut::History => {
-                if !self.sidebar_visible {
-                    self.toggle_sidebar();
-                }
-                self.sidebar.request_focus();
-                self.run_in_sidebar("window.burrow && burrow.openHistory()");
-            }
+            Shortcut::History => self.open_dialog("history", &serde_json::json!([])),
             Shortcut::Reload => self.with_active_browser(|b| b.reload()),
             Shortcut::Back => self.with_active_browser(|b| b.go_back()),
             Shortcut::Forward => self.with_active_browser(|b| b.go_forward()),
@@ -1847,7 +1865,13 @@ impl Burrow {
                 extensions: b.extensions_view(),
             };
             match serde_json::to_string(&view) {
-                Ok(json) => b.run_in_sidebar(&format!("window.burrow && burrow.render({json})")),
+                Ok(json) => {
+                    let js = format!("window.burrow && burrow.render({json})");
+                    b.run_in_sidebar(&js);
+                    if b.modal_open() {
+                        b.run_in_modal(js);
+                    }
+                }
                 Err(e) => eprintln!("Burrow: {e}"),
             }
         });

@@ -7,6 +7,12 @@ const $ = (id) => document.getElementById(id);
 const send = (msg) => console.log("__burrow__" + JSON.stringify(msg));
 const cmd = (name, args = {}) => send({ cmd: name, ...args });
 const act = (name, args = {}) => send({ act: name, ...args });
+// The same page also runs in the overlay that shows dialogs over the whole window (D-039).
+// There it shows only the dialog; in the sidebar, opening a dialog asks Rust to show it there.
+const MODAL = new URLSearchParams(location.search).has("modal");
+if (MODAL) document.documentElement.classList.add("modal");
+// The overlay gets the keyboard only once it is clicked, and then only if Rust moves it there.
+if (MODAL) document.addEventListener("mousedown", () => act("focus_dialog"), true);
 
 let view = null; // { state, live, shown, downloads, toast, arc_available, agent_active, … }
 let busy = 0; // >0 while renaming or dragging: renders wait so they don't clobber the UI
@@ -508,8 +514,17 @@ window.burrow = {
   render(v) {
     view = v;
     if (v.toast) toast(v.toast);
-    scheduleRender();
+    if (!MODAL) scheduleRender();
     if (dialogRefresh && !backdrop.hidden) dialogRefresh();
+  },
+  /** In the overlay: show a dialog the sidebar asked for (see DIALOGS). */
+  showDialog(name, args) {
+    const open = DIALOGS[name];
+    if (view && open) open(...args.map(decodeArg));
+  },
+  /** In the overlay: the keyboard arrived; give it to the dialog's first field. */
+  focusDialog() {
+    dialog.querySelector("input,select,textarea,.btn.primary")?.focus();
   },
   /** History matches for the address box (answer to act("suggest")). */
   suggestions(q, list) {
@@ -1020,6 +1035,7 @@ function openDialog(build) {
   dialogRefresh = null;
   historyView = null;
   dialog.replaceChildren();
+  dialog.onkeydown = null; // the last dialog's Enter handler
   build(dialog);
   backdrop.hidden = false;
   busy++;
@@ -1032,6 +1048,7 @@ function closeDialog() {
   dialogRefresh = null;
   historyView = null;
   busy--;
+  if (MODAL) return act("close_dialog");
   if (pendingRender) render();
 }
 backdrop.addEventListener("mousedown", (e) => e.target === backdrop && closeDialog());
@@ -1047,7 +1064,10 @@ function buttons(d, primaryLabel, onPrimary, danger) {
   };
   row.append(cancel, ok);
   d.append(row);
-  d.onkeydown = (e) => e.key === "Enter" && e.target.tagName !== "BUTTON" && ok.click();
+  // A block body: an `on…` handler that returns false cancels the key, so nothing could be typed.
+  d.onkeydown = (e) => {
+    if (e.key === "Enter" && e.target.tagName !== "BUTTON") ok.click();
+  };
 }
 
 const EMOJIS = ["", "🏠", "💼", "💻", "🧪", "📚", "🎨", "🎵", "🛒", "💰", "📈", "✈️", "🎮", "❤️", "⭐", "🔥", "🌱", "🕍", "👨‍👩‍👧", "🤖"];
@@ -1272,7 +1292,9 @@ function atcDialog(prefill) {
     ok.onclick = closeDialog;
     row.append(ok);
     d.append(row);
-    d.onkeydown = (e) => e.key === "Enter" && e.target === pattern && add.click();
+    d.onkeydown = (e) => {
+      if (e.key === "Enter" && e.target === pattern) add.click();
+    };
   });
 }
 
@@ -1535,7 +1557,9 @@ function extensionsDialog() {
     const form = el("div", "ext-form");
     form.append(input, add);
     d.append(form);
-    d.onkeydown = (e) => e.key === "Enter" && e.target === input && add.click();
+    d.onkeydown = (e) => {
+      if (e.key === "Enter" && e.target === input) add.click();
+    };
     const more = el("div", "buttons left");
     const folder = el("button", "btn", "From a Folder…");
     folder.onclick = () => act("choose_extension_file", { folder: true });
@@ -1645,4 +1669,24 @@ $("zoom").onclick = (e) => (e.preventDefault(), act("reset_zoom"));
 $("new-tab").querySelector(".ico").innerHTML = ICONS.plus;
 document.addEventListener("contextmenu", (e) => e.preventDefault());
 
-act("ready");
+// Dialogs open in the overlay (D-039). A space travels as its id.
+const DIALOGS = {
+  archive: archiveDialog, update: updateDialog, newSpace: newSpaceDialog, renameSpace: renameSpaceDialog,
+  icon: iconDialog, deleteSpace: deleteSpaceDialog, importArc: importArcDialog, search: searchDialog,
+  shortcuts: shortcutsDialog, downloads: downloadsDialog, atc: atcDialog, peek: peekDialog, boost: boostDialog,
+  history: historyDialog, extensions: extensionsDialog,
+};
+const encodeArg = (a) => (a && typeof a === "object" && a.id ? { space_id: a.id } : a);
+function decodeArg(a) {
+  return a && typeof a === "object" && a.space_id ? view.state.spaces.find((s) => s.id === a.space_id) : a;
+}
+if (!MODAL) {
+  const remote = (name) => (...args) => (hideMenu(), act("open_dialog", { name, args: args.map(encodeArg) }));
+  archiveDialog = remote("archive"); updateDialog = remote("update"); newSpaceDialog = remote("newSpace");
+  renameSpaceDialog = remote("renameSpace"); iconDialog = remote("icon"); deleteSpaceDialog = remote("deleteSpace");
+  importArcDialog = remote("importArc"); searchDialog = remote("search"); shortcutsDialog = remote("shortcuts");
+  downloadsDialog = remote("downloads"); atcDialog = remote("atc"); peekDialog = remote("peek");
+  boostDialog = remote("boost"); historyDialog = remote("history"); extensionsDialog = remote("extensions");
+}
+
+act(MODAL ? "modal_ready" : "ready");

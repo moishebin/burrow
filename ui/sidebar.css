@@ -316,3 +316,19 @@ body.resizing, body.resizing * { cursor: col-resize !important; }
 .notice { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-radius: 8px; background: rgba(79, 70, 229, 0.08); font-size: 12px; }
 .notice span { flex: 1; }
 .notice .btn.primary { flex: none; }
+
+/* ---- the dialog overlay over the whole window (D-039) ----
+   The page is the card itself: Rust dims the window behind it and sizes the card to this. */
+html.modal, html.modal body { height: auto; overflow: auto; background: #fff; }
+.modal #sidebar, .modal #resize-handle { display: none; }
+.modal #dialog-backdrop { position: static; display: block; background: none; }
+.modal #dialog-backdrop[hidden] { display: none; }
+.modal #dialog { width: 460px; max-height: none; border-radius: 0; box-shadow: none; padding: 18px; gap: 12px; }
+.modal #dialog.wide { width: 720px; }
+.modal #dialog h2 { font-size: 16px; }
+.modal #dialog p { font-size: 13px; }
+/* Lists can't size by the viewport here: the viewport is the card, which sizes by them. */
+.modal .history { max-height: 460px; }
+.modal .history .row { flex: none; }
+.modal .ext-list { max-height: 400px; }
+.modal .rules { max-height: 260px; }

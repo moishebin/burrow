@@ -133,6 +133,7 @@ impl Burrow {
             BUTTON_MINIMIZE => self.act(super::Act::WindowMinimize),
             BUTTON_MAXIMIZE => self.act(super::Act::WindowMaximize),
             BUTTON_CLOSE => self.act(super::Act::WindowClose),
+            super::modal::BACKDROP_BUTTON => self.close_modal(),
             _ => {}
         }
     }

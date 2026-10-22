@@ -32,7 +32,7 @@ impl Burrow {
         if self.divider.is_some() {
             return Some(());
         }
-        let mut client = clients::DividerClient::new();
+        let mut client = clients::UiClient::new();
         let mut delegate = views::DividerViewDelegate::new();
         let view = browser_view_create(
             Some(&mut client),

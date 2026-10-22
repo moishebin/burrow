@@ -381,3 +381,16 @@ The content area is a box layout. Its flex weights share out the *difference* fr
 Agents: `split_view` takes `ratio` when opening and has a `resize` action.
 
 **Verified** on Linux/Xvfb: the divider sits exactly at the saved ratio (0.8125 → x 1174 of a 1120 px area starting at 264); a real mouse drag of −400 px landed where computed; double-click reset to halves and saved; the agent's resize to 0.25 applied at once; a Peek still lays out as before.
+
+## D-039 · Dialogs open over the whole window, not inside the sidebar (2026-10-22)
+
+**Context.** Every dialog (History, Extensions, Air Traffic Control, Links and Peek, Boosts, spaces, settings, About and Updates) was drawn inside the sidebar's own page, squeezed to its width. Reported: they should show over the main browser.
+
+**Decision.**
+- A dialog opens **centered over the window** on a dimmed backdrop, using two overlays of the one window (never a second window). The backdrop is a native button covering the window, so clicking outside the dialog closes it. Above it sits a card with a page that **sizes itself to the dialog** (CEF auto-resize, up to the window minus a margin; long lists scroll). CEF paints pages in overlays opaque (tested: a transparent page showed a flat color), so the page can't draw the backdrop itself.
+- The card runs the sidebar's own page with `?modal`. In that mode it shows only the dialog, so every dialog's code stays as it was. In the sidebar, each dialog function (`DIALOGS` in sidebar.js) is replaced by one that asks Rust to open it by name (`open_dialog`); a space travels as its id. The card gets the same state pushes as the sidebar while it is open, and History's search answers go to both.
+- **Keyboard.** The keyboard stays with the page when a dialog opens, so Esc closes it from anywhere (the key handler knows a dialog is open). Clicking a field in the dialog moves typing there. This is the Peek approach (D-022): focusing into an overlay before it is clicked loses the keyboard altogether. Like a Peek, every dialog gets **new overlays** and they are destroyed on close. Reusing hidden overlays was tried first: an overlay that is hidden and shown again took the keyboard away from every page on Linux, so Esc stopped working after the first dialog.
+- **Fixed on the way:** typing into a dialog after another dialog had been open did nothing. `d.onkeydown = (e) => e.key === "Enter" && …` returns `false` for every other key, which cancels it, and `openDialog` never cleared the previous dialog's handler. The handlers now have block bodies, and `openDialog` resets `onkeydown`. The bug was there in the sidebar too.
+- Menus (right-click, +, the puzzle button) stay in the sidebar, as in Arc. Peeks and extension popups were already over the page.
+
+**Verified** on Linux/Xvfb with real input (on a display of its own: another checkout's test Burrow shared :99, so `run-xvfb.sh` now takes `BURROW_XVFB_DISPLAY`): History (Ctrl+H) opens centered with the page visible and dimmed behind; searching filters it; Esc from the page closes it, three times running; clicking the backdrop closes it; Extensions and Air Traffic Control from the + menu; Rename Space from the space menu gets its space, takes typing and saves with Enter, twice in a row.

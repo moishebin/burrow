@@ -135,6 +135,7 @@ wrap_keyboard_handler! {
                 && (browser::is_peek_browser(b.identifier())
                     || browser::is_popup_browser(b.identifier())
                     || browser::Burrow::peek_open()
+                    || browser::dialog_open()
                     || browser::page_fullscreen())
             {
                 browser::later(|b| b.shortcut(Shortcut::Escape));
@@ -559,20 +560,20 @@ fn sanitize(name: &str) -> String {
     if n.trim().is_empty() { "download".into() } else { n }
 }
 
-// ---- Split view divider (D-038) -----------------------------------------------------------------
+// ---- Burrow's own small pages: the split divider (D-038) and the dialog overlay (D-039) -------
 
 wrap_client! {
-    pub struct DividerClient {}
+    pub struct UiClient {}
     impl Client {
         // It talks to Rust like the sidebar does.
         fn display_handler(&self) -> Option<DisplayHandler> { Some(SidebarDisplay::new()) }
         fn keyboard_handler(&self) -> Option<KeyboardHandler> { Some(Keys::new()) }
-        fn life_span_handler(&self) -> Option<LifeSpanHandler> { Some(DividerLifeSpan::new()) }
+        fn life_span_handler(&self) -> Option<LifeSpanHandler> { Some(UiLifeSpan::new()) }
     }
 }
 
 wrap_life_span_handler! {
-    struct DividerLifeSpan {}
+    struct UiLifeSpan {}
     impl LifeSpanHandler {
         fn do_close(&self, _browser: Option<&mut Browser>) -> ::std::os::raw::c_int {
             (!browser::is_closing()) as _
@@ -618,6 +619,14 @@ wrap_drag_handler! {
 wrap_display_handler! {
     struct SidebarDisplay {}
     impl DisplayHandler {
+        /// The dialog overlay's page sizes its card (D-039).
+        fn on_auto_resize(&self, browser: Option<&mut Browser>, new_size: Option<&Size>) -> ::std::os::raw::c_int {
+            let (Some(id), Some(size)) = (id_of(browser), new_size) else { return 0 };
+            let size = size.clone();
+            browser::later(move |b| b.on_modal_resized(id, size));
+            1
+        }
+
         /// The sidebar talks to Rust by logging `__burrow__{json}` (D-009).
         fn on_console_message(
             &self,

@@ -4,6 +4,7 @@
 #
 #   scripts/run-xvfb.sh               start (or restart) Burrow on :99, DevTools on :9222
 #   scripts/run-xvfb.sh stop          stop Burrow and the display
+#   BURROW_XVFB_DISPLAY=:98 …         another display (e.g. a second checkout testing at once)
 #
 # Then: DISPLAY=:99 xdotool mousemove 100 200 click 1
 #       python3 scripts/xshot.py /tmp/shot.png
@@ -11,7 +12,7 @@
 set -euo pipefail
 
 repo="$(cd "$(dirname "$0")/.." && pwd)"
-display=":99"
+display="${BURROW_XVFB_DISPLAY:-:99}"
 data="${BURROW_DATA_DIR:-$repo/target/xvfb-data}"
 
 pkill -f "$repo/target/debug/burrow" 2>/dev/null || true
