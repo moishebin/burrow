@@ -57,7 +57,8 @@ Priority: **P0** = needed before the owner can switch from Arc · P1 = soon afte
 | Split view | ✅ | Two tabs (D-026). Not resizable yet. |
 | Password saving / autofill | ⬜ | Alloy has no password UI (D-010). Likely a built-in manager or an extension later. |
 | Default-browser registration on Windows | 🟡 | D-024. + → Make Burrow Your Default Browser… writes per-user registry entries and opens Settings. Links hand over to a running Burrow (verified on Linux). Windows side not yet checked by hand. |
-| Installer + auto-update | 🟡 | `scripts/install-win.sh`: per-user install + Start menu shortcut. Release archives for Windows and Linux (`scripts/package.sh`, D-020). No auto-update yet. |
+| Installer + auto-update | 🟡 | Windows setup .exe: per-user, Start menu, *Settings → Apps* uninstall, updates in place (D-030). Verified install/upgrade/uninstall on Windows. Zip and Linux archive too (D-020); the zip runs on a clean PC (D-029). Not code-signed yet (ready via `BURROW_SIGN`); no auto-update yet. |
+| Launching Burrow again focuses the running window | ✅ | D-029. Verified on Windows: restores a minimized window, no second window. |
 | Exe file icon (Explorer) | ✅ | `build.rs` + embed-resource (llvm-rc) |
 | Zoom indicator, per-site zoom memory | ✅ | D-026 |
 | History page | ✅ | A History list in the sidebar (Ctrl+H), D-023 |

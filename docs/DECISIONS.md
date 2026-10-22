@@ -255,3 +255,36 @@ Releases are GitHub releases tagged `v<version>`, with the archives attached. Th
 **Agents still don't disturb the user (D-018).** `split_view` never changes the active tab: the split appears only when the user is on one of its tabs. `duplicate_tab` stays in the background unless `focus` is set. `peek open` is the exception, since a Peek only exists over the tab the user is looking at; its description tells agents to use it only when asked. None of these are page tools (D-019): they don't read or act on a page's content, so they work when pages are blocked. Boosts do change how pages look; that is the owner's own choice of CSS, set on request.
 
 **Verified** on Linux/Xvfb through `burrow --agent`: a Boost set by an agent restyled an open page; history search and delete; zoom 125% saved for the site; mute; duplicate; split open/close; Peek open/status/close; the shown tab stayed the same throughout.
+
+## D-029 · Windows package runs on a clean PC; a second launch focuses the window (2026-10-22)
+
+**Context.** The 0.0.1 Windows archive had never been launched. Checking it as a downloaded package found two problems:
+1. `burrow.exe` imported `VCRUNTIME140.dll` (the Visual C++ Redistributable), which the archive doesn't include. Most PCs have it from other apps, but a clean Windows install may not, and Burrow wouldn't start there.
+2. Starting Burrow while it was already running (a second click on a shortcut) made CEF open a separate plain Chromium window ("New Tab - Chromium", with Google's new-tab page). That breaks the one-window rule.
+
+**Decision.**
+- Link the C runtime statically on Windows (`.cargo/config.toml`: `+crt-static`). `burrow.exe` now imports only Windows system DLLs and `libcef.dll`. None of the bundled CEF DLLs need the VC runtime. CEF's wrapper library was already built with the static runtime (`/MT`, by cef-dll-sys), so this also stops mixing two runtimes in one exe.
+- Implement `on_already_running_app_relaunch`: return 1 and bring the existing window to the front (restoring it if minimized). The second process exits.
+- Embed Windows version info in `burrow.exe` (product name "Burrow" and the Cargo version), so Explorer's file properties, Task Manager and SmartScreen show "Burrow". `build.rs` fills the version into `resources/burrow.rc`.
+- `package.sh` writes `dist/SHA256SUMS.txt` for the release page.
+- The README says to keep the `Burrow` folder together, where the data lives (outside the app folder, so updating means replacing the folder), and how to uninstall.
+
+**Verified.** On Windows: the archive was extracted with `Expand-Archive` into a new folder and run with a throwaway data folder, alongside the owner's installed Burrow, which was left running. Checked: the sidebar loaded from the app folder; a real HTTPS page loaded; the agent CLI could list, read and screenshot a tab; a graceful close saved `state.json` and the tab came back after a restart; and a second launch exited and restored the minimized window, with no extra window. Logs and caches go to the data folder, so the app folder can be read-only. The Linux archive was checked the same way on its own Xvfb display: a page loaded, the agent CLI worked, and a second launch exited with no extra window.
+
+**Still open.** The exe isn't code-signed, so SmartScreen warns on first run (needs a certificate). There's no installer, Start menu entry or auto-update for zip users; `scripts/install-win.sh` covers the owner's machine.
+
+## D-030 · A regular Windows installer (NSIS, per-user); signing plugs in later (2026-10-22)
+
+**Context.** The owner asked for "a regular install" and for the app to be signed.
+
+**Decision.** `scripts/package.sh` also builds `burrow-<version>-windows-x64-setup.exe` from `installer/burrow.nsi` with NSIS, next to the zip. NSIS was chosen because its compiler runs on Linux, so the whole release still builds from WSL (D-002). Inno Setup and WiX need Windows to build.
+- **Per-user, no admin**, into `%LOCALAPPDATA%\Programs\Burrow`. That is the same folder `install-win.sh` uses, so the owner's install is upgraded in place. Chrome's and VS Code's user installers work the same way, and a per-user install doesn't need UAC.
+- The installer adds a Start menu shortcut and an entry in *Settings → Apps* (HKCU uninstall key with version, size, publisher and icon). The finish page has "Start Burrow" and an "Add a desktop shortcut" checkbox.
+- **Updates and uninstalls handle a running Burrow:** they ask, then close it gracefully (it saves), wait up to 20 s, and offer Retry. The installer is 32-bit and can't see a 64-bit process's path through a 32-bit PowerShell, so it calls the 64-bit PowerShell via `Sysnative`.
+- **The uninstaller deletes only the files it installed** (a list generated at build time), never the whole folder, in case someone installed into a folder that holds other things. It asks whether to delete the data in `%LOCALAPPDATA%\Burrow`; the default, and the answer in silent mode, is No.
+- Silent install and uninstall work: `setup.exe /S [/D=folder]` and `uninstall.exe /S`.
+- The zip stays available for people who don't want an installer.
+
+**Signing.** Signing needs a certificate tied to a verified identity, which only the owner can get. The build is ready for it: set `BURROW_SIGN` to a command that signs a file in place. `package.sh` then signs `burrow.exe`, and NSIS signs the setup and the uninstaller it embeds (`!finalize` / `!uninstfinalize`).
+
+**Verified on Windows** (silent mode, installed to a temp folder, with the owner's Start menu shortcut backed up and restored): a fresh install put the files, registry entry and shortcut in place, and Burrow ran from it. An upgrade while Burrow ran closed it, it saved, and the files were replaced. An uninstall while Burrow ran removed the files, the folder, the registry entries and the shortcut, and kept the data. The owner's own `%LOCALAPPDATA%\Burrow` data was checked before and after and was untouched. The welcome page was captured to check the artwork. The other pages and their buttons weren't clicked through by hand.

@@ -1166,6 +1166,17 @@ impl Burrow {
         frame.execute_java_script(Some(&cef(&js)), Some(&CefString::from(&frame.url())), 0);
     }
 
+    /// Shows the window in front: Burrow was launched again (D-029) or got a link (D-024).
+    pub fn bring_to_front(&mut self) {
+        let Some(w) = &self.window else { return };
+        if w.is_minimized() != 0 {
+            w.restore();
+        }
+        w.show();
+        w.activate();
+        w.bring_to_top();
+    }
+
     fn apply_theme(&self) {
         let space = self.state.active_space();
         // With no tab open, the content card shows a light tint of the space color.
@@ -1422,12 +1433,7 @@ impl Burrow {
     /// Air Traffic Control picks, and the window comes to the front.
     pub fn open_external(&mut self, url: String) {
         self.open_link(None, url, LinkKind::External);
-        if let Some(w) = &self.window {
-            if w.is_minimized() != 0 {
-                w.restore();
-            }
-            w.activate();
-        }
+        self.bring_to_front();
     }
 
     /// Whether a link click in a pinned tab should open in a Peek instead (CEF asks before the

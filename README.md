@@ -27,9 +27,13 @@ Status: early, but usable day to day on Windows. See [docs/FEATURES.md](docs/FEA
 
 Get the latest build from [Releases](https://github.com/moishebin/burrow/releases):
 
-- **Windows (x64):** unzip `burrow-…-windows-x64.zip` anywhere and run `Burrow\burrow.exe`. It isn't signed yet, so Windows SmartScreen may warn the first time ("More info → Run anyway").
-- **Linux (x64):** `tar xzf burrow-…-linux-x64.tar.gz` and run `Burrow/burrow`. It needs the usual desktop libraries Chrome needs (GTK 3, NSS).
+- **Windows (x64):** run `burrow-…-windows-x64-setup.exe`. It installs Burrow for your account (no admin rights needed), adds it to the Start menu, and lists it in *Settings → Apps* for uninstalling. Running a newer setup updates Burrow and keeps your spaces, tabs and logins. It isn't signed yet, so Windows SmartScreen may warn the first time ("More info → Run anyway").
+  Prefer no installer? Unzip `burrow-…-windows-x64.zip` anywhere and run `Burrow\burrow.exe`; keep the folder together.
+- **Linux (x64):** `tar xzf burrow-…-linux-x64.tar.gz` and run `Burrow/burrow`. It needs the usual desktop libraries Chrome needs (GTK 3, NSS). Keep the folder together.
 - **macOS:** not built yet.
+
+Your spaces, tabs, history and logins are saved in `%LOCALAPPDATA%\Burrow` (Windows) or `~/.local/share/Burrow` (Linux), separate from the app, so updating never touches them. Uninstalling asks whether to delete them too.
+`SHA256SUMS.txt` on the release page lists each download's checksum.
 
 ## Building
 
@@ -42,8 +46,11 @@ cargo install cargo-xwin
 scripts/build-win.sh            # builds and copies to %LOCALAPPDATA%\Burrow-dev\app
 scripts/run-win.sh              # starts it with a throwaway profile and DevTools on :9222
 scripts/run-win.sh --real       # starts it with your real profile (%LOCALAPPDATA%\Burrow)
-scripts/package.sh              # release archives for Linux and Windows in dist/
+scripts/package.sh              # release archives for Linux and Windows, plus the Windows setup .exe, in dist/
 ```
+
+The Windows installer is built with NSIS (`installer/burrow.nsi`). `package.sh` expects it unpacked in `~/.local/nsis`:
+`apt-get download nsis nsis-common`, then `dpkg-deb -x` each into `~/.local/nsis` (no root needed).
 
 The first build downloads CEF (~400 MB) to `~/.local/share/cef`.
 
@@ -73,6 +80,7 @@ Add Burrow as an MCP server to your agent. For Claude Code:
 claude mcp add burrow -- "C:\Users\<you>\AppData\Local\Programs\Burrow\burrow.exe" --mcp
 # from WSL:
 claude mcp add burrow -- /mnt/c/Users/<you>/AppData/Local/Programs/Burrow/burrow.exe --mcp
+# (from the zip: use the burrow.exe in the folder you unzipped)
 ```
 
 Or call tools from a shell (Burrow starts if it isn't running):

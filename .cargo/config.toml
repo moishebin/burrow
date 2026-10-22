@@ -1,0 +1,5 @@
+# Link the C runtime statically on Windows, so burrow.exe doesn't need the Visual C++
+# Redistributable (VCRUNTIME140.dll), which a clean Windows install may lack. CEF's wrapper
+# library is already built with the static runtime (/MT) by cef-dll-sys (D-029).
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
