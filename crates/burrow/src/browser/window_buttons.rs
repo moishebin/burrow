@@ -1,12 +1,18 @@
-//! The top bar of the frameless window (D-035, D-045): the page's address on the left and
+//! The top bar of the frameless window (D-035, D-045, D-047): the page's address on the left and
 //! minimize, maximize and close on the right, as in Arc on Windows. It stays out of sight until
-//! the mouse goes to the top: at rest the overlay is only the strip above the content card,
-//! painted the window's color. Hovering anywhere along that strip opens the bar across the whole
-//! card and pushes the page down by its height, so it never covers the page.
+//! the mouse goes to the top: at rest it is only the strip above the content card, painted the
+//! window's color. With the mouse anywhere along that strip, the bar opens across the whole card
+//! and pushes the page down by its height, so it never covers the page.
+//!
+//! The address and the buttons are two window overlays. Between them is the window itself, which
+//! is a drag area for moving the window: an overlay is its own native child window on Windows, so
+//! the window's drag areas don't reach under one. Over a drag area the views don't see the mouse,
+//! so on Windows Burrow follows the cursor itself to open and close the bar; elsewhere it uses the
+//! overlays' hover and the bar has no drag area.
 
 use cef::*;
 
-use super::{argb, cef, Burrow};
+use super::{argb, cef, mix_with_white, now_ms, Burrow};
 use crate::{consts, task, views};
 
 pub const BUTTON_MINIMIZE: i32 = 101;
@@ -17,10 +23,13 @@ pub const BAR_URL: i32 = 104;
 const IDS: [i32; 4] = [BAR_URL, BUTTON_MINIMIZE, BUTTON_MAXIMIZE, BUTTON_CLOSE];
 
 const BUTTON_WIDTH: i32 = 46;
+const BUTTONS_WIDTH: i32 = BUTTON_WIDTH * 3;
 /// The open bar's height, from the window's top edge.
 const BAR_HEIGHT: i32 = 32;
 /// How long the bar stays after the mouse leaves it.
 const HIDE_DELAY_MS: i64 = 500;
+/// How often Burrow looks at the cursor where it follows it itself.
+const TRACK_MS: i64 = 100;
 const CLOSE_RED: u32 = 0xFFC42B1C;
 const INK: u32 = 0xFF1F1D2B;
 const WHITE: u32 = 0xFFFFFFFF;
@@ -28,13 +37,20 @@ const WHITE: u32 = 0xFFFFFFFF;
 const CHAR_WIDTH: i32 = 7;
 
 pub(super) struct WindowButtons {
-    overlay: OverlayController,
-    /// In `IDS` order.
+    /// The address; at rest, the whole strip above the card.
+    left: OverlayController,
+    /// Minimize, maximize and close.
+    right: OverlayController,
+    /// In `IDS` order: the address, then the three buttons.
     buttons: Vec<LabelButton>,
     hovered: [bool; 4],
     open: bool,
     /// Bumped on every hover change; a pending hide only runs if nothing happened since.
     generation: u64,
+    /// How long the cursor has been away from the open bar, where Burrow follows it.
+    away_ms: i64,
+    /// An agent showed the bar; it stays until then even without the mouse.
+    reveal_until: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -116,6 +132,17 @@ fn shorten(url: &str, max: usize) -> String {
     s
 }
 
+/// A horizontal panel for an overlay.
+fn row() -> Option<(Panel, Option<BoxLayout>)> {
+    let panel = panel_create(None)?;
+    let layout = panel.set_to_box_layout(Some(&BoxLayoutSettings {
+        horizontal: 1,
+        cross_axis_alignment: AxisAlignment::STRETCH,
+        ..Default::default()
+    }));
+    Some((panel, layout))
+}
+
 impl Burrow {
     /// Creates the top bar. Only for the frameless window; the system title bar has its own.
     pub(super) fn create_window_buttons(&mut self) -> Option<()> {
@@ -123,41 +150,49 @@ impl Burrow {
             return None;
         }
         let window = self.window.clone()?;
-        let panel = panel_create(None)?;
-        let layout = panel.set_to_box_layout(Some(&BoxLayoutSettings {
-            horizontal: 1,
-            cross_axis_alignment: AxisAlignment::STRETCH,
-            ..Default::default()
-        }));
+        let (left_panel, left_layout) = row()?;
+        let (right_panel, _) = row()?;
         let mut buttons = Vec::new();
         for id in IDS {
             let mut delegate = views::WindowButtonDelegate::new();
             let b = label_button_create(Some(&mut delegate), Some(&cef("")))?;
             View::from(&b).set_id(id);
             View::from(&b).set_focusable(0);
-            if id == BAR_URL {
-                b.set_horizontal_alignment(HorizontalAlignment::LEFT);
-                // Small, so a long address never pushes the buttons out of the bar.
-                b.set_minimum_size(Some(&Size { width: 1, height: BAR_HEIGHT }));
-            } else {
-                b.set_horizontal_alignment(HorizontalAlignment::CENTER);
-                b.set_minimum_size(Some(&Size { width: BUTTON_WIDTH, height: BAR_HEIGHT }));
-            }
             b.set_tooltip_text(Some(&cef(match id {
                 BAR_URL => "Copy link",
                 BUTTON_MINIMIZE => "Minimize",
                 BUTTON_MAXIMIZE => "Maximize",
                 _ => "Close",
             })));
-            panel.add_child_view(Some(&mut View::from(&b)));
-            if let Some(l) = &layout {
-                l.set_flex_for_view(Some(&mut View::from(&b)), (id == BAR_URL) as i32);
+            if id == BAR_URL {
+                b.set_horizontal_alignment(HorizontalAlignment::LEFT);
+                left_panel.add_child_view(Some(&mut View::from(&b)));
+                if let Some(l) = &left_layout {
+                    l.set_flex_for_view(Some(&mut View::from(&b)), 1);
+                }
+            } else {
+                b.set_horizontal_alignment(HorizontalAlignment::CENTER);
+                b.set_minimum_size(Some(&Size { width: BUTTON_WIDTH, height: BAR_HEIGHT }));
+                right_panel.add_child_view(Some(&mut View::from(&b)));
             }
             buttons.push(b);
         }
-        let overlay = window.add_overlay_view(Some(&mut View::from(&panel)), DockingMode::CUSTOM, 0)?;
-        self.window_buttons = Some(WindowButtons { overlay, buttons, hovered: [false; 4], open: false, generation: 0 });
+        let left = window.add_overlay_view(Some(&mut View::from(&left_panel)), DockingMode::CUSTOM, 0)?;
+        let right = window.add_overlay_view(Some(&mut View::from(&right_panel)), DockingMode::CUSTOM, 0)?;
+        self.window_buttons = Some(WindowButtons {
+            left,
+            right,
+            buttons,
+            hovered: [false; 4],
+            open: false,
+            generation: 0,
+            away_ms: 0,
+            reveal_until: 0,
+        });
         self.layout_window_buttons();
+        if cursor_screen_point().is_some() {
+            track_cursor();
+        }
         Some(())
     }
 
@@ -173,39 +208,46 @@ impl Burrow {
             content.set_insets(Some(&Insets { top: push, left: 0, bottom: 0, right: 0 }));
             self.content.layout();
         }
+        let base = argb(&self.state.active_space().color);
+        // Under the bar's drag area the card itself shows: the space color while open.
+        self.content.set_background_color(if open { base } else { mix_with_white(base, 0.75) });
         if self.fullscreen {
-            return wb.overlay.set_visible(0);
+            wb.left.set_visible(0);
+            wb.right.set_visible(0);
+            return self.apply_drag_regions();
         }
         let card = content.bounds();
         let width = card.width + consts::CARD_MARGIN;
-        let height = if open { BAR_HEIGHT } else { consts::CARD_MARGIN };
-        wb.overlay.set_bounds(Some(&Rect { x: card.x, y: 0, width, height }));
-
-        let base = argb(&self.state.active_space().color);
-        let maximized = self.window.as_ref().is_some_and(|w| w.is_maximized() != 0);
-        if let Some(panel) = wb.overlay.contents_view() {
-            panel.set_background_color(base);
+        let url_room = width - BUTTONS_WIDTH;
+        let url = wb.buttons[0].clone();
+        let text = self.state.active_tab().map_or("", |t| t.url.as_str());
+        url.set_text(Some(&cef(&if open { shorten(text, ((url_room - 24) / CHAR_WIDTH).max(1) as usize) } else { String::new() })));
+        url.set_enabled_text_colors(INK);
+        View::from(&url).set_background_color(base);
+        if open {
+            // Only as wide as the address where the rest of the bar moves the window.
+            let left_width = if cursor_screen_point().is_some() {
+                View::from(&url).preferred_size().width.min(url_room)
+            } else {
+                url_room
+            };
+            wb.left.set_bounds(Some(&Rect { x: card.x, y: 0, width: left_width, height: BAR_HEIGHT }));
+            wb.right.set_bounds(Some(&Rect { x: card.x + url_room, y: 0, width: BUTTONS_WIDTH, height: BAR_HEIGHT }));
+        } else {
+            wb.left.set_bounds(Some(&Rect { x: card.x, y: 0, width, height: consts::CARD_MARGIN }));
         }
-        for (i, b) in wb.buttons.iter().enumerate() {
+
+        let maximized = self.window.as_ref().is_some_and(|w| w.is_maximized() != 0);
+        for (i, b) in wb.buttons.iter().enumerate().skip(1) {
             let id = IDS[i];
             let hovered = wb.hovered[i];
-            let bg = match (id, hovered) {
-                (BAR_URL, _) => base,
-                (BUTTON_CLOSE, true) => CLOSE_RED,
-                (_, true) => darken(base, 0.12),
-                _ => base,
+            let (bg, ink) = match (id, hovered) {
+                (BUTTON_CLOSE, true) => (CLOSE_RED, WHITE),
+                (_, true) => (darken(base, 0.12), INK),
+                _ => (base, INK),
             };
             View::from(b).set_background_color(bg);
-            // The resting strip is too thin for text and glyphs; they'd show as cut-off marks.
-            if id == BAR_URL {
-                let url = self.state.active_tab().map_or("", |t| t.url.as_str());
-                let room = ((width - BUTTON_WIDTH * 3 - 24) / CHAR_WIDTH).max(1) as usize;
-                b.set_enabled_text_colors(INK);
-                b.set_text(Some(&cef(&if open { shorten(url, room) } else { String::new() })));
-                continue;
-            }
-            let ink = if id == BUTTON_CLOSE && hovered { WHITE } else { INK };
-            let mut image = if open { glyph_image(glyph(id, maximized), ink) } else { None };
+            let mut image = glyph_image(glyph(id, maximized), ink);
             for state in [ButtonState::NORMAL, ButtonState::HOVERED, ButtonState::PRESSED] {
                 b.set_image(state, image.as_mut());
             }
@@ -213,7 +255,9 @@ impl Burrow {
                 b.set_tooltip_text(Some(&cef(if maximized { "Restore" } else { "Maximize" })));
             }
         }
-        wb.overlay.set_visible(1);
+        wb.left.set_visible(1);
+        wb.right.set_visible(open as i32);
+        self.apply_drag_regions();
     }
 
     pub fn window_button(&mut self, id: i32) {
@@ -227,29 +271,64 @@ impl Burrow {
         }
     }
 
-    /// The mouse entered or left part of the bar. Entering opens it at once; leaving all of it
-    /// hides it after a short delay, so moving across it doesn't flicker.
+    /// The mouse entered or left part of the bar. Where Burrow follows the cursor itself this
+    /// only colors the buttons. Elsewhere entering opens the bar at once; leaving all of it hides
+    /// it after a short delay, so moving across it doesn't flicker.
     pub fn window_button_hover(&mut self, id: i32, hovered: bool) {
         let Some(wb) = &mut self.window_buttons else { return };
         let Some(i) = IDS.iter().position(|x| *x == id) else { return };
         wb.hovered[i] = hovered;
-        wb.generation += 1;
-        if wb.hovered.iter().any(|h| *h) {
-            wb.open = true;
-        } else {
-            let generation = wb.generation;
-            task::post_ui_delayed(HIDE_DELAY_MS, move || {
-                super::with(|b| {
-                    if let Some(wb) = &mut b.window_buttons
-                        && wb.generation == generation
-                    {
-                        wb.open = false;
-                        b.layout_window_buttons();
-                    }
-                });
-            });
+        if cursor_screen_point().is_none() {
+            wb.generation += 1;
+            if wb.hovered.iter().any(|h| *h) {
+                wb.open = true;
+            } else {
+                schedule_hide(wb.generation, HIDE_DELAY_MS);
+            }
         }
         self.layout_window_buttons();
+    }
+
+    /// Opens or closes the bar by where the cursor is: over the strip above the card, or over the
+    /// open bar, and not over another window in front of Burrow's.
+    fn track_cursor_tick(&mut self) {
+        let Some(window) = self.window.clone() else { return };
+        let Some(wb) = &self.window_buttons else { return };
+        let Some(mut point) = cursor_screen_point() else { return };
+        View::from(&window).convert_point_from_screen(Some(&mut point));
+        let card = View::from(&self.content).bounds();
+        let height = if wb.open { BAR_HEIGHT } else { consts::CARD_MARGIN };
+        let inside = !self.fullscreen
+            && window.is_minimized() == 0
+            && (card.x..card.x + card.width + consts::CARD_MARGIN).contains(&point.x)
+            && (0..height).contains(&point.y)
+            && cursor_over_window(&window);
+        let Some(wb) = &mut self.window_buttons else { return };
+        if inside {
+            wb.away_ms = 0;
+            if !wb.open {
+                wb.open = true;
+                self.layout_window_buttons();
+            }
+        } else if wb.open && now_ms() >= wb.reveal_until {
+            wb.away_ms += TRACK_MS;
+            if wb.away_ms >= HIDE_DELAY_MS {
+                wb.open = false;
+                self.layout_window_buttons();
+            }
+        }
+    }
+
+    /// The open bar's drag area in window coordinates: between the address and the buttons.
+    pub(super) fn top_bar_drag_rect(&self) -> Option<Rect> {
+        if !self.top_bar_open() || cursor_screen_point().is_none() {
+            return None;
+        }
+        let wb = self.window_buttons.as_ref()?;
+        let card = View::from(&self.content).bounds();
+        let url_room = card.width + consts::CARD_MARGIN - BUTTONS_WIDTH;
+        let text = View::from(&wb.buttons[0]).preferred_size().width.min(url_room);
+        Some(Rect { x: card.x + text, y: 0, width: (url_room - text).max(0), height: BAR_HEIGHT })
     }
 
     /// Whether the top bar is open (hovered, or shown by an agent).
@@ -262,18 +341,69 @@ impl Burrow {
         let Some(wb) = &mut self.window_buttons else { return false };
         wb.open = true;
         wb.generation += 1;
+        wb.reveal_until = now_ms() + 2000;
         let generation = wb.generation;
         self.layout_window_buttons();
-        task::post_ui_delayed(2000, move || {
-            super::with(|b| {
-                if let Some(wb) = &mut b.window_buttons
-                    && wb.generation == generation
-                {
-                    wb.open = false;
-                    b.layout_window_buttons();
-                }
-            });
-        });
+        if cursor_screen_point().is_none() {
+            schedule_hide(generation, 2000);
+        }
         true
     }
+}
+
+/// Closes the bar after `delay_ms` unless it was hovered since (`generation` changed).
+fn schedule_hide(generation: u64, delay_ms: i64) {
+    task::post_ui_delayed(delay_ms, move || {
+        super::with(|b| {
+            if let Some(wb) = &mut b.window_buttons
+                && wb.generation == generation
+            {
+                wb.open = false;
+                b.layout_window_buttons();
+            }
+        });
+    });
+}
+
+/// Looks at the cursor every `TRACK_MS` while the window is open.
+fn track_cursor() {
+    task::post_ui_delayed(TRACK_MS, || {
+        let alive = super::with(|b| {
+            b.track_cursor_tick();
+            b.window.is_some()
+        });
+        if alive == Some(true) {
+            track_cursor();
+        }
+    });
+}
+
+/// The mouse's position on screen in DIPs, where Burrow can ask for it.
+#[cfg(target_os = "windows")]
+fn cursor_screen_point() -> Option<Point> {
+    let mut p = windows::Win32::Foundation::POINT::default();
+    unsafe { windows::Win32::UI::WindowsAndMessaging::GetCursorPos(&mut p) }.ok()?;
+    Some(display_convert_screen_point_from_pixels(Some(&Point { x: p.x, y: p.y })))
+}
+
+#[cfg(not(target_os = "windows"))]
+fn cursor_screen_point() -> Option<Point> {
+    None
+}
+
+/// Whether the window under the cursor is Burrow's (or one of its overlays), not one in front.
+#[cfg(target_os = "windows")]
+fn cursor_over_window(window: &Window) -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetAncestor, GetCursorPos, WindowFromPoint, GA_ROOTOWNER};
+    let mut p = windows::Win32::Foundation::POINT::default();
+    if unsafe { GetCursorPos(&mut p) }.is_err() {
+        return false;
+    }
+    let root = unsafe { GetAncestor(WindowFromPoint(p), GA_ROOTOWNER) };
+    root.0 as usize == window.window_handle().0 as usize
+}
+
+#[cfg(not(target_os = "windows"))]
+fn cursor_over_window(_window: &Window) -> bool {
+    true
 }

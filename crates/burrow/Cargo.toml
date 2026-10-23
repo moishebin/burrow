@@ -16,9 +16,9 @@ serde.workspace = true
 serde_json.workspace = true
 arboard = { version = "3", default-features = false }
 
-# Windows toasts for web notifications (D-042).
+# Windows toasts for web notifications (D-042); the cursor position for the top bar (D-047).
 [target.'cfg(windows)'.dependencies]
-windows = { version = "0.61", features = ["UI_Notifications", "Data_Xml_Dom", "Foundation", "Win32_System_Com"] }
+windows = { version = "0.61", features = ["UI_Notifications", "Data_Xml_Dom", "Foundation", "Win32_System_Com", "Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
 
 [build-dependencies]
 embed-resource = "3"

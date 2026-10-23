@@ -27,7 +27,7 @@ Priority: **P0** = needed to switch from Arc · P1 = soon after · P2 = later
 | Import from Arc (spaces, folders, pinned, favorites) | ✅ | Verified on a real Arc profile |
 | Downloads (to ~/Downloads, list in sidebar, click to open) | ✅ | Verified |
 | Look and feel: space-tinted sidebar, content card, frameless window | ✅ | D-013. Dragging and resizing the frameless window not yet checked by hand. |
-| Top bar (address, minimize/maximize/close) that opens when hovering the top edge and pushes the page down (Arc for Windows) | ✅ | D-035, D-045. Verified on Xvfb with real mouse moves; not yet on Windows. Agent tool `window` (`show_bar`). |
+| Top bar (address, minimize/maximize/close) that opens when hovering the top edge, pushes the page down and moves the window when dragged (Arc for Windows) | ✅ | D-035, D-045, D-047. Verified on Windows with real cursor input. Agent tool `window` (`show_bar`). |
 | Dialogs (History, Extensions, Air Traffic Control, settings…) centered over the window | ✅ | D-039. Were squeezed into the sidebar. Verified on Xvfb with real input. |
 | Picture in picture for every video; auto when leaving a playing tab (Arc) | ✅ | D-036. Chromium's own floating window. Verified on Xvfb: auto on tab switch, back on return, "back to tab", close, Ctrl+Shift+P; the floating window also opens on Windows (D-043). Videos inside iframes not yet. Agent tool `picture_in_picture`. |
 | Camera / mic / notification permission prompts | ✅ | D-014. Verified the allow-and-remember flow. |

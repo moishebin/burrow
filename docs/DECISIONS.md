@@ -466,3 +466,17 @@ Done on the development machine while its screen was locked: no mouse, keyboard 
 - Agents: the `window` tool's `show_bar` action (old name `show_buttons` still works) opens the bar for two seconds; `status` reports `top_bar_open`.
 
 **Verified** on Linux/Xvfb with real mouse moves: hovering the top of the card opens the bar with the URL and drawn icons and moves the page down; the close button turns red; the bar hides after leaving; clicking the URL shows "Link copied"; `show_bar` opens it. Not yet checked on Windows.
+
+## D-047 · The top bar moves the window (2026-10-22)
+
+(D-046 is taken by the floating sidebar, built in parallel on another branch.)
+
+**Context.** D-045 made the strip above the card and the bar itself non-draggable, and people want to move the window by the top bar, as with any title bar.
+
+**Decision.**
+- The open bar is two window overlays: the address on the left (only as wide as its text) and the three buttons on the right. Between them, the window itself shows through (the card's background turns the space color while the bar is open), and that part is a drag area. One overlay across the whole bar can't work: on Windows an overlay is its own native child window, and the main window's drag areas (title-bar hit testing) don't reach under it. On Windows, dragging the bar of a maximized window restores it and moves it, as with a native title bar.
+- Over a drag area the views never see the mouse, and on Windows hover also failed in the top pixels of a restored window. So on Windows, Burrow follows the cursor itself: every 100 ms it reads the cursor (`GetCursorPos`) and opens the bar when the cursor is over the strip above the card, and closes it half a second after the cursor leaves the bar. It ignores the cursor when another window is in front of Burrow's at that point (`WindowFromPoint`). The buttons' hover now only colors them there.
+- Elsewhere (the Linux test build) Burrow can't read the cursor, so it keeps D-045's hover and the bar has no drag area.
+- An agent's `show_bar` keeps the bar open for two seconds in both cases.
+
+**Verified on Windows** with a separate test copy and real cursor input (`SetCursorPos`/`mouse_event`): at rest the page shows; hovering the strip 1, 4 and 7 px below the window's top opens the bar; the bar stays open with the cursor on the drag area; dragging there moved a restored window, and pulled a maximized one out of maximized; moving into the page closes the bar. The drawn button glyphs of D-045 render on Windows. On Linux/Xvfb the bar still opens on hover; Xvfb has no window manager, so nothing moves windows there.

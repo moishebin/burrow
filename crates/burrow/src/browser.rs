@@ -1247,13 +1247,17 @@ impl Burrow {
             vec![]
         };
         // The strip above the sidebar moves the window too; the strip above the card opens the
-        // top bar (D-045), which needs the mouse's hover, so it can't be a drag area.
+        // top bar (D-045), which needs the mouse's hover, so it can't be a drag area. The open
+        // bar's empty part is one (D-047).
         if !self.fullscreen {
             let card = View::from(&self.content).bounds();
             regions.push(DraggableRegion {
                 bounds: Rect { x: 0, y: 0, width: card.x, height: consts::CARD_MARGIN },
                 draggable: 1,
             });
+        }
+        if let Some(bounds) = self.top_bar_drag_rect() {
+            regions.push(DraggableRegion { bounds, draggable: 1 });
         }
         w.set_draggable_regions(Some(&regions));
     }
