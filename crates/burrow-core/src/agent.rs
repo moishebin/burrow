@@ -366,11 +366,11 @@ pub const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "window",
-        description: "Get or change Burrow's window: minimize, maximize, restore, fullscreen on or off, or show_buttons (slides out the minimize/maximize/close buttons in the top-right corner for two seconds, as hovering does). Change it only when the user asks. Default status.",
+        description: "Get or change Burrow's window: minimize, maximize, restore, fullscreen on or off, or show_bar (opens the top bar, with the page address and the minimize/maximize/close buttons, for two seconds, as hovering the top edge does; show_buttons is the old name). Change it only when the user asks. Default status.",
         schema: || {
             object(
                 json!({
-                    "action": { "type": "string", "enum": ["status", "minimize", "maximize", "restore", "fullscreen", "exit_fullscreen", "show_buttons"], "description": "Default status." }
+                    "action": { "type": "string", "enum": ["status", "minimize", "maximize", "restore", "fullscreen", "exit_fullscreen", "show_bar", "show_buttons"], "description": "Default status." }
                 }),
                 &[],
             )

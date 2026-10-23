@@ -25,7 +25,7 @@ An open-source browser in the spirit of Arc, built with Rust and Chromium (via C
 - **Picture in picture** for any video, like Arc: switch away from a tab playing a video and it keeps playing in a small floating window; come back and it returns to the page. Or right-click a tab → Picture in Picture, or Ctrl+Shift+P.
 - **Updates itself** (Windows installer): new versions download in the background and install when you restart or quit. **+ → About and Updates…**
 - **Website notifications** show as Windows notifications; click one to jump to its tab.
-- **Clean window**: minimize, maximize and close hide in the top-right corner until you point there.
+- **Clean window**: point at the top edge and a bar slides in above the page with its address (click to copy) and minimize, maximize and close; it hides again when you leave.
 
 Status: early, but usable day to day on Windows. See [docs/FEATURES.md](docs/FEATURES.md) for what works and what doesn't yet, and [docs/DECISIONS.md](docs/DECISIONS.md) for the reasoning behind each choice.
 

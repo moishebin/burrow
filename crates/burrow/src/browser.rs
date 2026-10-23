@@ -260,7 +260,8 @@ pub struct Burrow {
     /// Extensions being downloaded or unpacked, by a running number.
     ext_installs: HashMap<u64, extensions::Install>,
     next_install: u64,
-    /// Minimize, maximize and close in the corner, for the frameless window (D-035).
+    /// The top bar with the address and minimize, maximize and close, for the frameless window
+    /// (D-035, D-045).
     window_buttons: Option<window_buttons::WindowButtons>,
     /// The tab whose video is in picture in picture, as far as Burrow knows (D-036).
     pip_tab: Option<Id>,
@@ -1245,12 +1246,12 @@ impl Burrow {
         } else {
             vec![]
         };
-        // The strip above the card moves the window too, also with the sidebar hidden; the
-        // corner belongs to the window buttons.
+        // The strip above the sidebar moves the window too; the strip above the card opens the
+        // top bar (D-045), which needs the mouse's hover, so it can't be a drag area.
         if !self.fullscreen {
             let card = View::from(&self.content).bounds();
             regions.push(DraggableRegion {
-                bounds: Rect { x: 0, y: 0, width: (card.x + card.width - 3 * 46).max(0), height: consts::CARD_MARGIN },
+                bounds: Rect { x: 0, y: 0, width: card.x, height: consts::CARD_MARGIN },
                 draggable: 1,
             });
         }
@@ -1578,6 +1579,9 @@ impl Burrow {
         self.schedule_history_save();
         if new_site {
             self.apply_zoom(&id);
+        }
+        if self.top_bar_open() {
+            self.layout_window_buttons();
         }
         self.changed();
     }

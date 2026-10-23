@@ -164,7 +164,7 @@ wrap_browser_view_delegate! {
     }
 }
 
-// Minimize, maximize and close in the window's top-right corner; they show while hovered (D-035).
+// The top bar: the address and minimize, maximize and close; it opens while hovered (D-035, D-045).
 wrap_button_delegate! {
     pub struct WindowButtonDelegate {}
     impl ViewDelegate {}

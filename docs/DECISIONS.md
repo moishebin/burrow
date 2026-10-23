@@ -454,3 +454,15 @@ Done on the development machine while its screen was locked: no mouse, keyboard 
 **Contents.** D-032–D-043 (Chrome extensions and their badges, resizable sidebar and split view, performance, the new window corner, picture in picture, auto-update, dialogs over the window, sleeping tabs, website notifications). The same downloads as 0.0.2 (D-031). Not signed (D-030).
 
 **Upgrading.** 0.0.2 has no update check (D-037 came later), so 0.0.2 installs need the setup once; from 0.0.3 on, updates come by themselves. On the development machine, the installed 0.0.2 was upgraded with `setup /S /RELAUNCH /D=<its folder>`: it closed gracefully, the exe reports 0.0.3, and Burrow started again. Note for scripts: PowerShell's `Start-Process -Wait` on the setup doesn't return after `/RELAUNCH`, because it also waits for the Burrow the setup starts.
+
+## D-045 · A top bar with the address, replacing the corner buttons (2026-10-22)
+
+**Context.** On Windows the corner buttons of D-035 showed as missing-character boxes ("?" in a diamond): the Segoe MDL2 Assets glyphs didn't render in CEF's buttons. A change was also requested: a full bar over the top that pushes the page down instead of covering its corner, opens when the mouse goes anywhere along the top, and shows the page's address.
+
+**Decision.**
+- The overlay now spans the whole content card. At rest it is still the 8 px strip above the card in the space color. Hovering anywhere on it opens a 32 px bar: the active tab's URL on the left (clicking it copies the link, like Ctrl+Shift+C), minimize/maximize/close on the right (46 px each, red close on hover). While open, the content card gets a top inset of 24 px, so the page moves down below the bar rather than under it; the page relayouts on open and close. It hides half a second after the mouse leaves; the URL follows navigations while open.
+- The glyphs are drawn in code (10×10 logical px with a 1 px stroke, 4×4 supersampled, at 1x and 2x) and set as button images, so no font is needed.
+- The strip above the card is no longer a drag area: hover is what opens the bar, and a drag area takes the mouse away from the views (on Windows it becomes title-bar hit testing). The strip above the sidebar and the sidebar's own toolbar still move the window. The bar itself is not draggable, for the same reason.
+- Agents: the `window` tool's `show_bar` action (old name `show_buttons` still works) opens the bar for two seconds; `status` reports `top_bar_open`.
+
+**Verified** on Linux/Xvfb with real mouse moves: hovering the top of the card opens the bar with the URL and drawn icons and moves the page down; the close button turns red; the bar hides after leaving; clicking the URL shows "Link copied"; `show_bar` opens it. Not yet checked on Windows.

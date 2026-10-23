@@ -274,7 +274,7 @@ impl Burrow {
                             self.shortcut(super::Shortcut::Fullscreen);
                         }
                     }
-                    "show_buttons" => {
+                    "show_bar" | "show_buttons" => {
                         if !self.reveal_window_buttons() {
                             return Some(Err("the window uses the system title bar, which has its own buttons".into()));
                         }
@@ -285,6 +285,7 @@ impl Burrow {
                     "maximized": w.is_maximized() != 0,
                     "minimized": w.is_minimized() != 0,
                     "fullscreen": self.fullscreen,
+                    "top_bar_open": self.top_bar_open(),
                 }))
             }
             "mute_tab" => tab().and_then(|t| {
