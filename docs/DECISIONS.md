@@ -554,3 +554,15 @@ Done on the development machine while its screen was locked: no mouse, keyboard 
 - D-049 skipped every lookup that ended on another site. That also skipped Google Chat, which moves from `mail.google.com/chat` to `chat.google.com`. Now only a lookup that ends on a sign-in page (`favicon::is_sign_in`: hosts like `accounts.`/`login.`, paths with `signin`/`login`/`oauth`) falls back to the asked site's `/favicon.ico`; other redirects are followed.
 - Cache version 4: icons saved by D-049's builds are looked up once more.
 - D-049's per-app keys (`SPLIT_HOSTS`) stay: they aren't icons, only which addresses share an icon.
+
+## D-053 · The top bar opens on every monitor (2026-10-22)
+
+**Problem (reported).** The top bar stopped opening on hover. The owner's Burrow is maximized on a second monitor, left of the main one (X=-1920, Y=7).
+
+**Cause.** Burrow follows the cursor itself on Windows (D-047) and converted the cursor's screen point into window coordinates with `View::convert_point_from_screen`. For a window on that monitor the call left the point unchanged, (-958, 9) in and out, so the cursor never fell inside the card's range. On the main monitor the window's origin is about (0, 0), so the unconverted point happened to work, which is why D-047's checks passed.
+
+**Decision.** Compare the cursor with the card's bounds in screen coordinates (`content.bounds_in_screen()`). The strip is the 8 px above the card's top, and the open bar the 32 px from there. Nothing else in Burrow uses `convert_point_from_screen`.
+
+An 8 px "overhang" of maximized windows was suspected first and ruled out. `GetWindowRect` counts Windows' invisible resize border, and the window's visible top is the monitor's top.
+
+**Verified on Windows** with a separate test copy, real cursor moves and screenshots: maximized on the left monitor (the owner's setup), the bar did not open before the fix and opens after it; maximized on the main monitor it opens before and after.

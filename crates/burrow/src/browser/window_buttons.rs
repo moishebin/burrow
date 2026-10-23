@@ -375,14 +375,16 @@ impl Burrow {
     fn track_cursor_tick(&mut self) {
         let Some(window) = self.window.clone() else { return };
         let Some(wb) = &self.window_buttons else { return };
-        let Some(mut point) = cursor_screen_point() else { return };
-        View::from(&window).convert_point_from_screen(Some(&mut point));
-        let card = View::from(&self.content).bounds();
+        let Some(point) = cursor_screen_point() else { return };
+        // In screen coordinates: `convert_point_from_screen` left the point unchanged on a second
+        // monitor left of the main one, so the bar never opened there (D-053).
+        let card = View::from(&self.content).bounds_in_screen();
+        let top = card.y - consts::CARD_MARGIN;
         let height = if wb.open { BAR_HEIGHT } else { consts::CARD_MARGIN };
         let inside = !self.fullscreen
             && window.is_minimized() == 0
             && (card.x..card.x + card.width + consts::CARD_MARGIN).contains(&point.x)
-            && (0..height).contains(&point.y)
+            && (top..top + height).contains(&point.y)
             && cursor_over_window(&window);
         let Some(wb) = &mut self.window_buttons else { return };
         if inside {
