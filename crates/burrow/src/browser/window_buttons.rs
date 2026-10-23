@@ -32,7 +32,15 @@ const HIDE_DELAY_MS: i64 = 500;
 const TRACK_MS: i64 = 100;
 const CLOSE_RED: u32 = 0xFFC42B1C;
 const INK: u32 = 0xFF1F1D2B;
+/// The address and the glyphs at rest: quieter than the page, dark again on hover.
+const INK_SOFT: u32 = 0xFF5F5B6E;
 const WHITE: u32 = 0xFFFFFFFF;
+/// Space before the address, from the card's left edge.
+const URL_PAD: i32 = 10;
+#[cfg(target_os = "windows")]
+const FONT: &str = "Segoe UI, 12px";
+#[cfg(not(target_os = "windows"))]
+const FONT: &str = "Sans, 12px";
 /// Roughly how wide one character of the address is, to shorten it before it reaches the buttons.
 const CHAR_WIDTH: i32 = 7;
 
@@ -122,6 +130,13 @@ fn darken(c: u32, amount: f32) -> u32 {
     0xFF00_0000 | ch(16) | ch(8) | ch(0)
 }
 
+/// The address as the bar shows it: without the scheme, `www.` or a lone trailing slash.
+fn display_url(url: &str) -> &str {
+    let s = url.split_once("://").map_or(url, |(_, rest)| rest);
+    let s = s.strip_prefix("www.").unwrap_or(s);
+    s.strip_suffix('/').unwrap_or(s)
+}
+
 /// Shortens `url` to at most `max` characters, ending in an ellipsis.
 fn shorten(url: &str, max: usize) -> String {
     if url.chars().count() <= max {
@@ -151,6 +166,7 @@ impl Burrow {
         }
         let window = self.window.clone()?;
         let (left_panel, left_layout) = row()?;
+        left_panel.set_insets(Some(&Insets { top: 0, left: URL_PAD, bottom: 0, right: 0 }));
         let (right_panel, _) = row()?;
         let mut buttons = Vec::new();
         for id in IDS {
@@ -166,6 +182,7 @@ impl Burrow {
             })));
             if id == BAR_URL {
                 b.set_horizontal_alignment(HorizontalAlignment::LEFT);
+                b.set_font_list(Some(&cef(FONT)));
                 left_panel.add_child_view(Some(&mut View::from(&b)));
                 if let Some(l) = &left_layout {
                     l.set_flex_for_view(Some(&mut View::from(&b)), 1);
@@ -220,14 +237,18 @@ impl Burrow {
         let width = card.width + consts::CARD_MARGIN;
         let url_room = width - BUTTONS_WIDTH;
         let url = wb.buttons[0].clone();
-        let text = self.state.active_tab().map_or("", |t| t.url.as_str());
-        url.set_text(Some(&cef(&if open { shorten(text, ((url_room - 24) / CHAR_WIDTH).max(1) as usize) } else { String::new() })));
-        url.set_enabled_text_colors(INK);
+        let text = display_url(self.state.active_tab().map_or("", |t| t.url.as_str()));
+        let room = (url_room - URL_PAD - 24) / CHAR_WIDTH;
+        url.set_text(Some(&cef(&if open { shorten(text, room.max(1) as usize) } else { String::new() })));
+        url.set_enabled_text_colors(if wb.hovered[0] { INK } else { INK_SOFT });
         View::from(&url).set_background_color(base);
+        if let Some(panel) = wb.left.contents_view() {
+            panel.set_background_color(base);
+        }
         if open {
             // Only as wide as the address where the rest of the bar moves the window.
             let left_width = if cursor_screen_point().is_some() {
-                View::from(&url).preferred_size().width.min(url_room)
+                (URL_PAD + View::from(&url).preferred_size().width).min(url_room)
             } else {
                 url_room
             };
@@ -243,8 +264,8 @@ impl Burrow {
             let hovered = wb.hovered[i];
             let (bg, ink) = match (id, hovered) {
                 (BUTTON_CLOSE, true) => (CLOSE_RED, WHITE),
-                (_, true) => (darken(base, 0.12), INK),
-                _ => (base, INK),
+                (_, true) => (darken(base, 0.08), INK),
+                _ => (base, INK_SOFT),
             };
             View::from(b).set_background_color(bg);
             let mut image = glyph_image(glyph(id, maximized), ink);
@@ -327,7 +348,7 @@ impl Burrow {
         let wb = self.window_buttons.as_ref()?;
         let card = View::from(&self.content).bounds();
         let url_room = card.width + consts::CARD_MARGIN - BUTTONS_WIDTH;
-        let text = View::from(&wb.buttons[0]).preferred_size().width.min(url_room);
+        let text = (URL_PAD + View::from(&wb.buttons[0]).preferred_size().width).min(url_room);
         Some(Rect { x: card.x + text, y: 0, width: (url_room - text).max(0), height: BAR_HEIGHT })
     }
 

@@ -522,3 +522,13 @@ Done on the development machine while its screen was locked: no mouse, keyboard 
 - Agents: no new tool. The `sidebar` tool already hides and shows the sidebar; peeking is a hover preview of the same sidebar.
 
 **Verified** on Linux/Xvfb with real mouse and keys: the page doesn't move or resize while the sidebar peeks; frames of the slide show the contents moving with the edge, in and out; hovering keeps it open; typing in its address box works and keeps it open after the mouse leaves; clicking the page closes it; Ctrl+S hides and shows it again with the keyboard staying in a page's text field throughout; the toggle button while peeking brings it back; F11 in and out; no tabs open; the margins keep the space color. Not checked: resizing the window (Xvfb has no window manager), and anything on Windows.
+
+## D-050 · A quieter top bar (2026-10-22)
+
+**Context.** Reported on Windows: the top bar of D-045/D-047 looks ugly. It showed the raw URL (`https://…/`) in the default font right against the card's edge, with dark glyphs on a flat strip.
+
+**Decision.** Only the look changes. The behavior is still D-047's: two overlays with the window showing through between them as the drag area, the hover and cursor rules, click to copy, and the page pushed down.
+- The address is shown without the scheme, `www.` or a lone trailing slash, in a 12 px font (Segoe UI on Windows), in a soft gray (`INK_SOFT`) that turns dark when hovered. It starts 10 px in from the card's edge (`URL_PAD`, also counted in the drag-area math).
+- The minimize, maximize and close glyphs are soft gray at rest and dark on hover, over a lighter hover shade (8 % instead of 12 %). Close still turns red.
+
+**Verified** on Linux/Xvfb with `window show_bar`: the bar shows `example.com` in the smaller gray font with space before it, and the buttons are quieter. The Windows look is not yet checked by hand.
