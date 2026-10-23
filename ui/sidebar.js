@@ -152,6 +152,8 @@ function render() {
   const sp = space();
   document.documentElement.style.setProperty("--space", sp.color || "#c9c2f0");
   document.body.classList.toggle("collapsed", !!view.sidebar_collapsed);
+  document.body.classList.toggle("floating", !!view.sidebar_floats);
+  slideSidebar(view.sidebar_floats ? !!view.peeking : null);
   peeking = !!view.peeking;
   positions = {};
 
@@ -485,6 +487,7 @@ addressInput.addEventListener("blur", () => {
   $("find-count").hidden = true;
   $("address").classList.remove("find");
   if (view) renderAddress();
+  maybeUnpeek();
 });
 addressInput.addEventListener("input", () => {
   if (addressMode === "find") act("find", { text: addressInput.value, forward: true, next: false });
@@ -643,6 +646,7 @@ function startRename(row, node) {
     else if (save && !isFolder && value !== titleOf(node)) cmd("rename_tab", { tab_id: node.id, title: value || null });
     input.replaceWith(label);
     if (pendingRender || busy === 0) render();
+    maybeUnpeek();
   };
   input.onkeydown = (e) => {
     if (e.key === "Enter") finish(true);
@@ -678,6 +682,7 @@ function makeDraggable(node, id, url) {
     dragged = null;
     busy--;
     if (pendingRender) render();
+    maybeUnpeek();
   });
 }
 
@@ -840,6 +845,7 @@ function fillMenu(items, parentItems) {
 
 function hideMenu() {
   menu.hidden = true;
+  maybeUnpeek();
 }
 document.addEventListener("click", (e) => !menu.contains(e.target) && hideMenu());
 document.addEventListener("keydown", (e) => {
@@ -1724,20 +1730,65 @@ $("toast").onclick = () => ($("toast").hidden = true);
 
 $("btn-toggle").onclick = () => act("toggle_sidebar");
 
-// Hidden sidebar: hovering its edge strip slides it out; leaving slides it back (Arc-style).
+// Hidden sidebar (D-046): hovering its edge strip slides it out over the page; leaving slides it
+// back after a moment, unless a menu, the address box, a rename or a drag still needs it.
 let peeking = false;
+let hovered = false;
+let unpeekTimer = 0;
+function maybeUnpeek() {
+  clearTimeout(unpeekTimer);
+  unpeekTimer = setTimeout(() => {
+    const typing = document.hasFocus() && document.activeElement === addressInput;
+    if (peeking && !hovered && busy === 0 && menu.hidden && !typing) {
+      peeking = false;
+      slideSidebar(false);
+      act("peek_sidebar", { on: false });
+    }
+  }, 300);
+}
+// Burrow reveals the floating sidebar from the left edge (`float.rs`); the contents slide along
+// with the same timing. A CSS transform, because moving the view itself under a mouse that
+// stands still makes Chromium report the mouse leaving.
+const SLIDE = { duration: 180, easing: "cubic-bezier(0.33, 1, 0.68, 1)" }; // ease-out cubic
+let slidOut = true; // the sidebar's contents are in view (or sliding into view)
+// `shown`: slide the contents into view (true) or away (false); null when the sidebar is docked.
+// Hovering starts it at once, without waiting for Burrow's answer, so both start together.
+function slideSidebar(shown) {
+  const bar = $("sidebar");
+  if (shown === null) {
+    bar.getAnimations().forEach((a) => a.cancel());
+    bar.style.width = "";
+    slidOut = true;
+    return;
+  }
+  // The window shows only part of a floating sidebar while it slides; the contents keep their
+  // full width meanwhile, so they don't relayout.
+  const width = view.state.settings.sidebar_width;
+  bar.style.width = `${width}px`;
+  if (shown === slidOut) return;
+  slidOut = shown;
+  const from = getComputedStyle(bar).transform;
+  const away = `translateX(${10 - width}px)`; // all but the 10 px edge strip
+  bar.getAnimations().forEach((a) => a.cancel());
+  bar.animate([{ transform: from === "none" && shown ? away : from }, { transform: shown ? "none" : away }], {
+    ...SLIDE,
+    fill: shown ? "none" : "forwards",
+  });
+}
 document.documentElement.addEventListener("mouseenter", () => {
-  if (view && view.sidebar_collapsed && !peeking) {
+  hovered = true;
+  clearTimeout(unpeekTimer);
+  if (!MODAL && view && view.sidebar_floats && !peeking) {
     peeking = true;
+    slideSidebar(true);
     act("peek_sidebar", { on: true });
   }
 });
 document.documentElement.addEventListener("mouseleave", () => {
-  if (peeking && busy === 0 && menu.hidden && document.activeElement !== addressInput) {
-    peeking = false;
-    act("peek_sidebar", { on: false });
-  }
+  hovered = false;
+  maybeUnpeek();
 });
+window.addEventListener("blur", maybeUnpeek);
 $("toolbar").ondblclick = (e) => e.target === $("toolbar") && act("window_maximize");
 $("btn-back").onclick = () => act("back");
 $("btn-forward").onclick = () => act("forward");

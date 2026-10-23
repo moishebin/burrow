@@ -117,7 +117,7 @@ Under the hood it's a local HTTP API (`POST http://127.0.0.1:<port>/v1/<tool>`, 
 | Ctrl+D | Pin / unpin |
 | Ctrl+1…9 | Switch space |
 | Ctrl+Tab | Next tab |
-| Ctrl+S | Hide / show sidebar |
+| Ctrl+S | Hide / show sidebar (while hidden, point at the left edge to slide it out over the page) |
 | Ctrl+F | Find in page |
 | Ctrl+Shift+T | Reopen closed tab |
 | Alt+← / → | Back / forward |

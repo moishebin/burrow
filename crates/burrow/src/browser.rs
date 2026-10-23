@@ -17,6 +17,7 @@ use crate::{clients, consts, paths, task, views, writer};
 
 mod divider;
 mod extensions;
+mod float;
 mod icons;
 mod modal;
 mod notes;
@@ -217,6 +218,8 @@ pub struct Burrow {
     sidebar_visible: bool,
     /// The hidden sidebar is temporarily shown because the mouse is over its edge strip.
     peeking: bool,
+    /// The hidden sidebar's overlay (D-046); `None` while the sidebar is in the layout.
+    float: Option<float::Float>,
     content: Panel,
     tabs: HashMap<Id, LiveTab>,
     contexts: HashMap<Id, Profile>,
@@ -403,6 +406,7 @@ pub fn start() {
             sidebar,
             sidebar_visible: true,
             peeking: false,
+            float: None,
             content,
             tabs: HashMap::new(),
             contexts: HashMap::new(),
@@ -521,15 +525,19 @@ impl Burrow {
     fn layout_window(&self) {
         let Some(window) = &self.window else { return };
         let m = if self.fullscreen { 0 } else { consts::CARD_MARGIN };
+        // A floating sidebar leaves its edge strip uncovered by the card (D-046).
+        let left = if self.float.is_some() { consts::SIDEBAR_COLLAPSED_WIDTH } else { 0 };
         let layout = window.set_to_box_layout(Some(&BoxLayoutSettings {
             horizontal: 1,
-            inside_border_insets: Insets { top: m, left: 0, bottom: m, right: m },
+            inside_border_insets: Insets { top: m, left, bottom: m, right: m },
             cross_axis_alignment: AxisAlignment::STRETCH,
             ..Default::default()
         }));
         View::from(&self.sidebar).set_visible(!self.fullscreen as i32);
         if let Some(layout) = layout {
-            layout.set_flex_for_view(Some(&mut View::from(&self.sidebar)), 0);
+            if self.float.is_none() {
+                layout.set_flex_for_view(Some(&mut View::from(&self.sidebar)), 0);
+            }
             layout.set_flex_for_view(Some(&mut View::from(&self.content)), 1);
         }
         window.layout();
@@ -677,9 +685,10 @@ impl Burrow {
             Act::FocusContent => self.focus_content(),
             Act::ToggleSidebar => self.toggle_sidebar(),
             Act::PeekSidebar { on } => {
-                if !self.sidebar_visible && self.peeking != on {
+                if self.float.is_some() && self.peeking != on {
                     self.peeking = on;
-                    self.resize_sidebar();
+                    self.push_state();
+                    self.slide_float();
                 }
             }
             Act::OpenDownload { path } => open_path(&path),
@@ -1157,7 +1166,9 @@ impl Burrow {
     fn focus_content(&self) {
         match self.shown.as_ref().and_then(|id| self.tabs.get(id)) {
             Some(t) => t.view.request_focus(),
-            None => self.sidebar.request_focus(),
+            // A floating sidebar can't take the keyboard before it is clicked (D-022).
+            None if self.float.is_none() => self.sidebar.request_focus(),
+            None => {}
         }
     }
 
@@ -1169,11 +1180,16 @@ impl Burrow {
         self.run_in_sidebar(&format!("window.burrow && burrow.focusInput({new_tab})"));
     }
 
-    /// Hiding the sidebar leaves a thin edge strip; hovering it peeks the sidebar back out.
+    /// Hiding the sidebar leaves a thin edge strip; hovering it slides the sidebar out over the
+    /// page (D-046). Hiding slides it away over the page, which takes the full width at once.
     pub fn toggle_sidebar(&mut self) {
         self.sidebar_visible = !self.sidebar_visible;
         self.peeking = false;
+        self.place_sidebar(self.state.settings.sidebar_width as i32);
         self.resize_sidebar();
+        if self.float.is_some() {
+            self.slide_float();
+        }
     }
 
     fn sidebar_shown(&self) -> bool {
@@ -1185,14 +1201,13 @@ impl Burrow {
         self.push_state();
     }
 
-    /// Sizes the sidebar view: its chosen width, or the edge strip while hidden.
+    /// Sizes the sidebar view to its chosen width, in the layout or floating.
     fn apply_sidebar_width(&mut self) {
-        views::set_sidebar_width(if self.sidebar_shown() {
-            self.state.settings.sidebar_width as i32
-        } else {
-            consts::SIDEBAR_COLLAPSED_WIDTH
-        });
+        views::set_sidebar_width(self.state.settings.sidebar_width as i32);
         View::from(&self.sidebar).invalidate_layout();
+        if self.float.is_some() {
+            self.resize_float();
+        }
         if let Some(w) = &self.window {
             w.layout();
         }
@@ -1235,7 +1250,9 @@ impl Burrow {
         }
         let mut origin = Point { x: 0, y: 0 };
         View::from(&self.sidebar).convert_point_to_window(Some(&mut origin));
-        let mut regions: Vec<DraggableRegion> = if self.sidebar_shown() {
+        // Not while the sidebar floats: a drag area takes the mouse away from the views (D-045),
+        // which would end a peek.
+        let mut regions: Vec<DraggableRegion> = if self.float.is_none() && self.sidebar_shown() {
             self.drag_regions
                 .iter()
                 .map(|(r, drag)| DraggableRegion {
@@ -1263,6 +1280,7 @@ impl Burrow {
     }
 
     pub fn on_window_resized(&mut self) {
+        self.layout_float();
         self.apply_drag_regions();
         self.layout_modal();
         self.layout_window_buttons();
@@ -1290,6 +1308,8 @@ impl Burrow {
             if let Some(w) = &self.window {
                 w.set_fullscreen(on as i32);
             }
+            self.peeking = false;
+            self.place_sidebar(consts::SIDEBAR_COLLAPSED_WIDTH);
             self.layout_window();
         }
         self.sync_view();
@@ -1853,6 +1873,8 @@ impl Burrow {
                 maximized: bool,
                 sidebar_collapsed: bool,
                 peeking: bool,
+                /// The hidden sidebar floats over the page (D-046): hovering it peeks.
+                sidebar_floats: bool,
                 agent_active: bool,
                 icons: icons::IconsView<'a>,
                 /// The tabs in the content area (two in split view).
@@ -1886,8 +1908,9 @@ impl Burrow {
                 find: b.find,
                 frameless: b.frameless(),
                 maximized: b.window.as_ref().is_some_and(|w| w.is_maximized() != 0),
-                sidebar_collapsed: !b.sidebar_shown(),
+                sidebar_collapsed: !b.sidebar_shown() && b.float_at_rest(),
                 peeking: b.peeking,
+                sidebar_floats: b.float.is_some(),
                 agent_active: b.agent_active,
                 icons: b.icons.view(),
                 visible: &b.visible,

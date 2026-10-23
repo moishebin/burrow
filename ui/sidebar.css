@@ -248,6 +248,8 @@ svg { display: block; flex: none; }
 /* Hidden sidebar: only a thin edge strip is left; hovering it peeks the sidebar out. */
 body.collapsed #sidebar { visibility: hidden; }
 body.collapsed { background: var(--space); }
+/* Floating over the page (D-046): a hairline where it meets the page. */
+body.floating:not(.collapsed) { box-shadow: inset -1px 0 0 rgba(31, 29, 43, 0.14); }
 
 /* ---- zoom chip in the address box ---- */
 #zoom { font-size: 11px; color: var(--ink-soft); padding: 2px 6px; border-radius: 6px; background: rgba(0, 0, 0, 0.06); }
