@@ -4,6 +4,8 @@
 //! A loaded page reports its icon and Burrow saves it. For a site with no saved icon, Burrow
 //! fetches the tab's page in its space's profile (so signed-in apps answer as usual), reads the
 //! `<link rel=icon>` tags, and saves the best icon that downloads.
+//!
+//! Icons are kept per site, and per app on hosts with several apps (D-049).
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -22,11 +24,19 @@ const PARALLEL: usize = 4;
 /// Enough of a page to find the `<link>` tags in its `<head>`.
 const MAX_PAGE_BYTES: usize = 512 * 1024;
 const ICON_PIXELS: u32 = 128;
+/// Bumped when icons saved by older versions should be looked up again. 2: lookups sent no
+/// cookies, so signed-in apps (Gmail, Google Voice) saved their sign-in page's icon (D-049).
+const CACHE_VERSION: &str = "2";
+/// `URLRequest` flag: send the profile's cookies, so signed-in apps answer with their own page.
+const UR_FLAG_ALLOW_STORED_CREDENTIALS: i32 = 8;
 
 #[derive(Default)]
 pub(super) struct Icons {
-    /// Hosts with an icon on disk, and a version that changes when the file does.
+    /// Icon keys (`favicon::icon_key`) with an icon on disk, and a version that changes when the
+    /// file does.
     saved: HashMap<String, u64>,
+    /// Saved icons from an older cache version: shown, but looked up again.
+    stale: HashSet<String>,
     /// Hosts already looked up (or refreshed from a loaded page) since Burrow started.
     tried: HashSet<String>,
     refreshed: HashSet<String>,
@@ -40,24 +50,36 @@ pub(super) struct Icons {
 pub(super) struct IconsView<'a> {
     base: String,
     files: HashMap<&'a str, String>,
+    /// Hosts whose icons are kept per app (`favicon::SPLIT_HOSTS`).
+    split_hosts: &'static [&'static str],
 }
 
 impl Icons {
     /// Reads which icons are already saved.
     pub(super) fn load() -> Self {
         let mut icons = Icons::default();
-        if let Ok(entries) = std::fs::read_dir(paths::favicons_dir()) {
+        let dir = paths::favicons_dir();
+        let marker = dir.join("version");
+        let current = std::fs::read_to_string(&marker).is_ok_and(|v| v.trim() == CACHE_VERSION);
+        if let Ok(entries) = std::fs::read_dir(&dir) {
             for e in entries.flatten() {
                 let name = e.file_name().to_string_lossy().into_owned();
-                let Some(host) = name.strip_suffix(".png") else { continue };
+                let Some(stem) = name.strip_suffix(".png") else { continue };
+                let host = favicon::key_of_file(stem);
                 let version = e
                     .metadata()
                     .and_then(|m| m.modified())
                     .ok()
                     .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
                     .map_or(1, |d| d.as_secs());
-                icons.saved.insert(host.to_string(), version);
+                if !current {
+                    icons.stale.insert(host.clone());
+                }
+                icons.saved.insert(host, version);
             }
+        }
+        if !current {
+            let _ = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&marker, CACHE_VERSION));
         }
         icons
     }
@@ -65,13 +87,8 @@ impl Icons {
     pub(super) fn view(&self) -> IconsView<'_> {
         let base = format!("{}://icons/", crate::scheme::SCHEME);
         let files = self.saved.iter().map(|(h, v)| (h.as_str(), format!("{}?v={v}", favicon::file_name(h)))).collect();
-        IconsView { base, files }
+        IconsView { base, files, split_hosts: favicon::SPLIT_HOSTS }
     }
-}
-
-fn host_key(url: &str) -> Option<String> {
-    let host = links::host_of(url);
-    (!host.is_empty() && (url.starts_with("https://") || url.starts_with("http://"))).then_some(host)
 }
 
 impl Burrow {
@@ -88,19 +105,28 @@ impl Burrow {
     fn scan_icons(&mut self) {
         self.icons.scan_pending = false;
         let mut wanted: Vec<(String, String, Id)> = vec![];
+        let mut known: Vec<(String, String)> = vec![];
         for space in &self.state.spaces {
             for tab in space.tabs() {
                 let url = tab.home_url.as_deref().unwrap_or(&tab.url);
-                let Some(host) = host_key(url) else { continue };
-                if self.icons.saved.contains_key(&host) || self.icons.tried.contains(&host) {
+                let Some(host) = favicon::icon_key(url) else { continue };
+                let fresh = self.icons.saved.contains_key(&host) && !self.icons.stale.contains(&host);
+                if fresh || self.icons.tried.contains(&host) {
                     continue;
                 }
                 if !self.contexts.get(&space.profile_id).is_some_and(|p| p.ready) {
                     continue; // asked again once the profile is ready
                 }
                 self.icons.tried.insert(host.clone());
+                if let Some(icon) = favicon::known_icon(&host) {
+                    known.push((host, icon));
+                    continue;
+                }
                 wanted.push((host, url.to_string(), space.profile_id.clone()));
             }
+        }
+        for (host, icon) in known {
+            self.try_icons(host, VecDeque::from([icon]), false);
         }
         self.icons.queue.extend(wanted);
         self.pump_icons();
@@ -117,21 +143,31 @@ impl Burrow {
         }
     }
 
-    /// A page was fetched (or failed, with empty HTML): try its icons in order.
-    fn on_page_fetched(&mut self, host: String, page_url: String, html: String) {
-        let candidates = favicon::candidates(&html, &page_url);
+    /// A page was fetched (or failed, with empty HTML): try its icons in order. A page that
+    /// sent Burrow to another site (a sign-in page) has that site's icon, so then only the asked
+    /// site's `/favicon.ico` is tried.
+    fn on_page_fetched(&mut self, host: String, asked_url: String, page_url: String, html: String) {
+        let candidates = if links::host_of(&page_url) == links::host_of(&asked_url) {
+            favicon::candidates(&html, &page_url)
+        } else {
+            favicon::resolve(&asked_url, "/favicon.ico").into_iter().collect()
+        };
         self.try_icons(host, candidates.into(), true);
     }
 
     /// A loaded page named its icon: save it, once per site per run (icons change rarely).
     pub(super) fn on_page_icon(&mut self, page_url: &str, icon_url: String) {
-        let Some(host) = host_key(page_url) else { return };
+        let Some(host) = favicon::icon_key(page_url) else { return };
         if !self.icons.refreshed.insert(host.clone()) {
             return;
         }
         self.icons.tried.insert(host.clone());
         let fallback = favicon::resolve(page_url, "/favicon.ico").unwrap_or_default();
-        self.try_icons(host, VecDeque::from([icon_url, fallback]), false);
+        let candidates = match favicon::known_icon(&host) {
+            Some(known) => VecDeque::from([known]),
+            None => VecDeque::from([icon_url, fallback]),
+        };
+        self.try_icons(host, candidates, false);
     }
 
     /// Downloads the first icon of `candidates` that works and saves it for `host`.
@@ -152,6 +188,7 @@ impl Burrow {
         let version = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(1, |d| d.as_secs());
+        self.icons.stale.remove(&host);
         self.icons.saved.insert(host, version);
         if counted {
             self.icons.in_flight -= 1;
@@ -213,13 +250,15 @@ fn fetch_page(url: &str, context: &mut RequestContext, host: String) -> bool {
     let Some(mut request) = request_create() else { return false };
     request.set_url(Some(&cef(url)));
     request.set_method(Some(&cef("GET")));
-    let mut client = PageFetch::new(host, Arc::new(Mutex::new(Vec::new())));
+    request.set_flags(UR_FLAG_ALLOW_STORED_CREDENTIALS);
+    let mut client = PageFetch::new(host, url.to_string(), Arc::new(Mutex::new(Vec::new())));
     urlrequest_create(Some(&mut request), Some(&mut client), Some(context)).is_some()
 }
 
 wrap_urlrequest_client! {
     struct PageFetch {
         host: String,
+        url: String,
         body: Arc<Mutex<Vec<u8>>>,
     }
     impl UrlrequestClient {
@@ -237,13 +276,14 @@ wrap_urlrequest_client! {
 
         fn on_request_complete(&self, request: Option<&mut Urlrequest>) {
             let host = self.host.clone();
+            let asked_url = self.url.clone();
             let final_url = request
                 .and_then(|r| r.response())
                 .map(|r| CefString::from(&r.url()).to_string())
                 .filter(|u| !u.is_empty())
                 .unwrap_or_else(|| format!("https://{host}/"));
             let html = self.body.lock().map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
-            later(move |b| b.on_page_fetched(host, final_url, html));
+            later(move |b| b.on_page_fetched(host, asked_url, final_url, html));
         }
     }
 }

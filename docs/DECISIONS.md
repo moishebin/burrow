@@ -492,3 +492,19 @@ Done on the development machine while its screen was locked: no mouse, keyboard 
 - Agents: the `sidebar` tool takes 180–600 px.
 
 **Verified** on Linux/Xvfb with eight favorites: three to a row at 220 px, with the address box and space header fitting above the folders.
+
+## D-049 · The right icons for Google's apps (2026-10-22)
+
+**Problem (reported).** Gmail, Google Voice, Sheets and other Google favorites showed the generic Google "G". There were three causes:
+1. D-025's lookup fetched a favorite's page without the profile's cookies (a `URLRequest` sends none unless `UR_FLAG_ALLOW_STORED_CREDENTIALS` is set). Google answered with its sign-in or marketing page, and Burrow saved that page's icon. `mail.google.com`, `docs.google.com`, `voice.google.com` and `google.com` all had the same 1336-byte "G".
+2. Icons were kept per host, but Gmail and Google Chat share `mail.google.com`, and Docs, Sheets, Slides and Forms share `docs.google.com`.
+3. Even signed in, Google's pages aren't a reliable source. Signed out, they give no app icon at all.
+
+**Decision.**
+- Icons are saved under an *icon key* (`burrow_core::favicon::icon_key`). That is the host, plus the first part of the path on hosts with several apps (`SPLIT_HOSTS`: `mail.google.com`, `docs.google.com`), e.g. `docs.google.com/spreadsheets` → `docs.google.com_spreadsheets.png`. The sidebar computes the same key; the list of split hosts comes from Rust in the state.
+- Google's own apps (Gmail, Chat, Sheets, Docs, Slides, Forms, Voice, Calendar, Drive, Meet, Keep) use Google's public product icons (`gstatic.com/images/branding/product/2x/<app>_2020q4_48dp.png`). They are used both for the lookup and when a loaded page reports its icon.
+- The page lookup sends the profile's cookies. If the page redirects to another site (a sign-in page), only the asked site's `/favicon.ico` is tried, never the other site's icons.
+- A pinned tab or favorite that is on another site than its home (e.g. a Google sign-in page) shows its home site's icon first.
+- Icons saved before this (cache version 2, a `version` file in the icon folder) are looked up once more in the background and replaced when that succeeds; until then the old ones show.
+
+**Verified** on Linux/Xvfb (signed out of Google): favorites for Gmail, Chat, Sheets, Docs, Voice, Calendar and GitHub got their own icons from an empty cache. A deliberately wrong saved icon was replaced on the next start, and the version marker was written.

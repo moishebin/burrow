@@ -76,10 +76,23 @@ const GLOBE_IMG =
   "data:image/svg+xml," +
   encodeURIComponent(ICONS.globe.replace('stroke="currentColor"', 'stroke="#6b6880"').replace('width="16" height="16"', 'width="24" height="24"'));
 
+/** The key Burrow saves a URL's icon under: its host, plus the app on hosts with several
+ *  (`burrow_core::favicon::icon_key`, D-049). */
+function iconKey(url) {
+  const host = hostOf(url).toLowerCase();
+  if (!view.icons.split_hosts.includes(host)) return host;
+  try {
+    const app = new URL(url).pathname.split("/")[1].toLowerCase();
+    return app ? `${host}/${app}` : host;
+  } catch {
+    return host;
+  }
+}
+
 /** The icon Burrow saved on disk for a URL's site (D-025), if any. */
 function savedIcon(url) {
   if (!url || !/^https?:/.test(url) || !view.icons) return null;
-  const file = view.icons.files[hostOf(url).toLowerCase()];
+  const file = view.icons.files[iconKey(url)];
   return file ? view.icons.base + file : null;
 }
 
@@ -90,8 +103,10 @@ const brokenIcons = new Set();
 function favicon(tab, size = 16) {
   if (isLoading(tab.id)) return el("span", "spinner");
   // Best first: the saved icon of the site the tab is on, of its home site, the icon the page
-  // reported, the site's /favicon.ico; a globe if none loads.
-  const sources = [savedIcon(tab.url), savedIcon(tab.home_url)];
+  // reported, the site's /favicon.ico; a globe if none loads. A pinned tab or favorite that is
+  // on another site than its home (a sign-in page) shows its home site's icon first.
+  const away = tab.home_url && hostOf(tab.home_url) !== hostOf(tab.url);
+  const sources = away ? [savedIcon(tab.home_url), savedIcon(tab.url)] : [savedIcon(tab.url), savedIcon(tab.home_url)];
   if (tab.favicon && /^(https?:|data:image\/)/.test(tab.favicon)) sources.push(tab.favicon);
   if (/^https?:/.test(tab.url)) {
     try { sources.push(new URL(tab.url).origin + "/favicon.ico"); } catch { /* not a URL */ }
