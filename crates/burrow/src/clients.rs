@@ -18,6 +18,15 @@ fn string(s: Option<&CefString>) -> String {
     s.map(|s| s.to_string()).unwrap_or_default()
 }
 
+/// The strings of a list CEF lends to a callback. Not `list.clone()`: cef-rs's clone of a
+/// borrowed list copies the opaque list handle by value, so the copy always reads as empty
+/// (D-054). Wrapping the same pointer again borrows the real list.
+pub fn strings(list: Option<&mut CefStringList>) -> Vec<String> {
+    let Some(list) = list else { return vec![] };
+    let raw: *mut sys::_cef_string_list_t = list.into();
+    CefStringList::from(raw).into_iter().collect()
+}
+
 #[cfg(target_os = "windows")]
 type OsEvent = sys::MSG;
 #[cfg(not(target_os = "windows"))]
@@ -390,7 +399,7 @@ wrap_display_handler! {
 
         fn on_favicon_urlchange(&self, browser: Option<&mut Browser>, icon_urls: Option<&mut CefStringList>) {
             let Some(id) = id_of(browser) else { return };
-            let Some(url) = icon_urls.and_then(|l| l.clone().into_iter().next()) else { return };
+            let Some(url) = strings(icon_urls).into_iter().next() else { return };
             browser::later(move |b| b.on_favicon(id, url));
         }
 

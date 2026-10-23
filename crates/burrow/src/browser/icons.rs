@@ -5,7 +5,8 @@
 //! fetches the tab's page in its space's profile (so signed-in apps answer as usual), reads the
 //! `<link rel=icon>` tags, and saves the best icon that downloads.
 //!
-//! Icons are kept per site, and per app on hosts with several apps (D-049, D-052).
+//! The sidebar shows the icon a tab's own page reported first (D-054); these saved site icons
+//! are for tabs that haven't loaded yet.
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
@@ -25,17 +26,15 @@ const PARALLEL: usize = 4;
 const MAX_PAGE_BYTES: usize = 512 * 1024;
 const ICON_PIXELS: u32 = 128;
 /// Bumped when icons saved by older versions should be looked up again. 2: lookups sent no
-/// cookies, so signed-in apps (Gmail, Google Voice) saved their sign-in page's icon. 3 and 4: Google's
-/// apps briefly had outdated icons built in, and redirects to another app host were skipped
-/// (D-049, D-052).
-const CACHE_VERSION: &str = "4";
+/// cookies, so signed-in apps (Gmail, Google Voice) saved their sign-in page's icon (D-049).
+/// 5: icons were briefly kept per app on some Google hosts (D-049–D-052, undone in D-054).
+const CACHE_VERSION: &str = "5";
 /// `URLRequest` flag: send the profile's cookies, so signed-in apps answer with their own page.
 const UR_FLAG_ALLOW_STORED_CREDENTIALS: i32 = 8;
 
 #[derive(Default)]
 pub(super) struct Icons {
-    /// Icon keys (`favicon::icon_key`) with an icon on disk, and a version that changes when the
-    /// file does.
+    /// Hosts with an icon on disk, and a version that changes when the file does.
     saved: HashMap<String, u64>,
     /// Saved icons from an older cache version: shown, but looked up again.
     stale: HashSet<String>,
@@ -52,8 +51,6 @@ pub(super) struct Icons {
 pub(super) struct IconsView<'a> {
     base: String,
     files: HashMap<&'a str, String>,
-    /// Hosts whose icons are kept per app (`favicon::SPLIT_HOSTS`).
-    split_hosts: &'static [&'static str],
 }
 
 impl Icons {
@@ -66,8 +63,12 @@ impl Icons {
         if let Ok(entries) = std::fs::read_dir(&dir) {
             for e in entries.flatten() {
                 let name = e.file_name().to_string_lossy().into_owned();
-                let Some(stem) = name.strip_suffix(".png") else { continue };
-                let host = favicon::key_of_file(stem);
+                let Some(host) = name.strip_suffix(".png").map(str::to_string) else { continue };
+                // Per-app icons of D-049 (`docs.google.com_spreadsheets`); no host has a `_`.
+                if !current && host.contains('_') {
+                    let _ = std::fs::remove_file(e.path());
+                    continue;
+                }
                 let version = e
                     .metadata()
                     .and_then(|m| m.modified())
@@ -89,7 +90,7 @@ impl Icons {
     pub(super) fn view(&self) -> IconsView<'_> {
         let base = format!("{}://icons/", crate::scheme::SCHEME);
         let files = self.saved.iter().map(|(h, v)| (h.as_str(), format!("{}?v={v}", favicon::file_name(h)))).collect();
-        IconsView { base, files, split_hosts: favicon::SPLIT_HOSTS }
+        IconsView { base, files }
     }
 }
 
@@ -137,15 +138,9 @@ impl Burrow {
         }
     }
 
-    /// A page was fetched (or failed, with empty HTML): try its icons in order. A lookup that
-    /// ended on a sign-in page has that page's icon, so then only the asked site's
-    /// `/favicon.ico` is tried. Other redirects (Google Chat moving to its own host) are followed.
-    fn on_page_fetched(&mut self, host: String, asked_url: String, page_url: String, html: String) {
-        let candidates = if favicon::is_sign_in(&page_url) && !favicon::is_sign_in(&asked_url) {
-            favicon::resolve(&asked_url, "/favicon.ico").into_iter().collect()
-        } else {
-            favicon::candidates(&html, &page_url)
-        };
+    /// A page was fetched (or failed, with empty HTML): try its icons in order.
+    fn on_page_fetched(&mut self, host: String, page_url: String, html: String) {
+        let candidates = favicon::candidates(&html, &page_url);
         self.try_icons(host, candidates.into(), true);
     }
 
@@ -241,14 +236,13 @@ fn fetch_page(url: &str, context: &mut RequestContext, host: String) -> bool {
     request.set_url(Some(&cef(url)));
     request.set_method(Some(&cef("GET")));
     request.set_flags(UR_FLAG_ALLOW_STORED_CREDENTIALS);
-    let mut client = PageFetch::new(host, url.to_string(), Arc::new(Mutex::new(Vec::new())));
+    let mut client = PageFetch::new(host, Arc::new(Mutex::new(Vec::new())));
     urlrequest_create(Some(&mut request), Some(&mut client), Some(context)).is_some()
 }
 
 wrap_urlrequest_client! {
     struct PageFetch {
         host: String,
-        url: String,
         body: Arc<Mutex<Vec<u8>>>,
     }
     impl UrlrequestClient {
@@ -266,14 +260,13 @@ wrap_urlrequest_client! {
 
         fn on_request_complete(&self, request: Option<&mut Urlrequest>) {
             let host = self.host.clone();
-            let asked_url = self.url.clone();
             let final_url = request
                 .and_then(|r| r.response())
                 .map(|r| CefString::from(&r.url()).to_string())
                 .filter(|u| !u.is_empty())
                 .unwrap_or_else(|| format!("https://{host}/"));
             let html = self.body.lock().map(|b| String::from_utf8_lossy(&b).into_owned()).unwrap_or_default();
-            later(move |b| b.on_page_fetched(host, asked_url, final_url, html));
+            later(move |b| b.on_page_fetched(host, final_url, html));
         }
     }
 }

@@ -1606,6 +1606,10 @@ impl Burrow {
         if let Some(t) = self.state.tab_mut(&id) {
             new_site = links::host_of(&t.url) != links::host_of(&url);
             t.url = url.clone();
+            // Forget the old site's icon; the new page names its own (D-054).
+            if new_site {
+                t.favicon = None;
+            }
         }
         let title = self.state.tab(&id).map(|t| t.title.clone()).unwrap_or_default();
         self.history.record(&url, if new_site { "" } else { &title }, now_ms());

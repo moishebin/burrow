@@ -33,7 +33,7 @@ Priority: **P0** = needed to switch from Arc · P1 = soon after · P2 = later
 | Camera / mic / notification permission prompts | ✅ | D-014. Verified the allow-and-remember flow. |
 | Page context menu: open link in new tab, copy link, search | ✅ | D-014 |
 | App icon (window/taskbar) | ✅ | `scripts/make-icon.py` |
-| Site icons for every tab, also never-loaded ones | ✅ | D-025, D-049, D-052. Saved on disk; found from the page's `<link rel=icon>`; per app on Google's shared hosts (Gmail vs Chat, Docs vs Sheets), icons always from the sites, fetched with the profile's sign-in (D-052). Verified on Windows (signed in) and Xvfb. |
+| Site icons for every tab, also never-loaded ones | ✅ | D-025, D-054. Each tab shows the icon its page reports now, as in Arc, kept for tabs not loaded since; never-loaded tabs use a saved site icon (fetched with the profile's sign-in). Verified on Xvfb. |
 
 ## P1
 

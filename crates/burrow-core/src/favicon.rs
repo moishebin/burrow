@@ -2,56 +2,17 @@
 
 use crate::links;
 
-/// Hosts that serve several apps, each with its own icon, told apart by the first part of the
-/// path: Gmail and Google Chat on mail.google.com, Docs, Sheets, Slides and Forms on
-/// docs.google.com. Their icons are kept per app (D-049).
-pub const SPLIT_HOSTS: &[&str] = &["mail.google.com", "docs.google.com"];
-
-/// The key a page's icon is saved under: its host, plus the first part of the path on
-/// `SPLIT_HOSTS` (`docs.google.com/spreadsheets`). None for anything but http(s) URLs.
+/// The key a site's icon is saved under: its host. None for anything but http(s) URLs.
 pub fn icon_key(url: &str) -> Option<String> {
     let lower = url.to_ascii_lowercase();
     if !lower.starts_with("https://") && !lower.starts_with("http://") {
         return None;
     }
     let host = links::host_of(url);
-    if host.is_empty() {
-        return None;
-    }
-    if !SPLIT_HOSTS.contains(&host.as_str()) {
-        return Some(host);
-    }
-    let rest = url.split_once("://").map_or("", |(_, r)| r);
-    let path = rest.find('/').map_or("", |i| &rest[i + 1..]);
-    let first = path.split(['/', '?', '#']).next().unwrap_or("").to_ascii_lowercase();
-    Some(if first.is_empty() { host } else { format!("{host}/{first}") })
+    (!host.is_empty()).then_some(host)
 }
 
-/// Whether a URL looks like a sign-in page (`accounts.google.com`, `login.microsoftonline.com`,
-/// `…/signin`). An icon lookup that ends on one would save the sign-in page's icon (D-052).
-pub fn is_sign_in(url: &str) -> bool {
-    let host = links::host_of(url);
-    let first = host.split('.').next().unwrap_or("");
-    if matches!(first, "accounts" | "login" | "signin" | "auth" | "sso" | "id") {
-        return true;
-    }
-    let rest = url.split_once("://").map_or("", |(_, r)| r);
-    let path = rest.find('/').map_or("", |i| &rest[i..]).split(['?', '#']).next().unwrap_or("");
-    let path = path.to_ascii_lowercase();
-    ["login", "signin", "sign-in", "sign_in", "oauth", "authorize", "sso"].iter().any(|w| path.contains(w))
-}
-
-/// The key a cache file holds, from its name without `.png` (`file_name` turns `/` into `_`).
-pub fn key_of_file(stem: &str) -> String {
-    for host in SPLIT_HOSTS {
-        if let Some(app) = stem.strip_prefix(host).and_then(|r| r.strip_prefix('_')) {
-            return format!("{host}/{app}");
-        }
-    }
-    stem.to_string()
-}
-
-/// The cache file name for an icon key, e.g. `mail.google.com.png`, `docs.google.com_spreadsheets.png`.
+/// The cache file name for an icon key, e.g. `mail.google.com.png`.
 pub fn file_name(host: &str) -> String {
     let safe: String = host
         .chars()
@@ -159,28 +120,10 @@ mod tests {
     }
 
     #[test]
-    fn google_apps_get_their_own_icons() {
-        assert_eq!(icon_key("https://mail.google.com/mail/u/0/#inbox").unwrap(), "mail.google.com/mail");
-        assert_eq!(icon_key("https://mail.google.com/chat/u/0/?x=1#chat/home").unwrap(), "mail.google.com/chat");
-        assert_eq!(icon_key("https://docs.google.com/spreadsheets/d/1Vk/edit").unwrap(), "docs.google.com/spreadsheets");
-        assert_eq!(icon_key("https://docs.google.com/").unwrap(), "docs.google.com");
+    fn icons_are_kept_per_host() {
+        assert_eq!(icon_key("https://mail.google.com/mail/u/0/#inbox").unwrap(), "mail.google.com");
         assert_eq!(icon_key("https://www.GitHub.com/a/b").unwrap(), "github.com");
         assert_eq!(icon_key("burrow://ui/x"), None);
-        assert_eq!(file_name("docs.google.com/spreadsheets"), "docs.google.com_spreadsheets.png");
-        assert_eq!(key_of_file("docs.google.com_spreadsheets"), "docs.google.com/spreadsheets");
-        assert_eq!(key_of_file("mail.google.com"), "mail.google.com");
-        assert_eq!(key_of_file("app.slack.com"), "app.slack.com");
-    }
-
-    #[test]
-    fn sign_in_pages_are_recognized() {
-        assert!(is_sign_in("https://accounts.google.com/v3/signin/identifier?continue=x"));
-        assert!(is_sign_in("https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?x"));
-        assert!(is_sign_in("https://app.slack.com/workspace-signin?redir=x"));
-        assert!(is_sign_in("https://github.com/login"));
-        assert!(!is_sign_in("https://chat.google.com/u/0/app/home"));
-        assert!(!is_sign_in("https://mail.google.com/mail/u/0/?flowName=GlifWebSignIn#inbox"));
-        assert!(!is_sign_in("https://workspace.google.com/intl/en-US/gmail/"));
     }
 
     #[test]

@@ -756,7 +756,7 @@ wrap_run_file_dialog_callback! {
     struct ChosenFile {}
     impl RunFileDialogCallback {
         fn on_file_dialog_dismissed(&self, file_paths: Option<&mut CefStringList>) {
-            let Some(path) = file_paths.and_then(|l| l.clone().into_iter().next()) else { return };
+            let Some(path) = crate::clients::strings(file_paths).into_iter().next() else { return };
             later(move |b| b.install_from_path(path, None));
         }
     }

@@ -566,3 +566,15 @@ Done on the development machine while its screen was locked: no mouse, keyboard 
 An 8 px "overhang" of maximized windows was suspected first and ruled out. `GetWindowRect` counts Windows' invisible resize border, and the window's visible top is the monitor's top.
 
 **Verified on Windows** with a separate test copy, real cursor moves and screenshots: maximized on the left monitor (the owner's setup), the bar did not open before the fix and opens after it; maximized on the main monitor it opens before and after.
+
+## D-054 · Tab icons are what the page shows, as in Arc (2026-10-22)
+
+**Problem.** The owner asked for no special treatment: every tab should show the icon its page shows right now (a sign-in page's icon while on the sign-in page, Gmail's once the page is Gmail), changing as the page changes, as Arc does. Looking into why Burrow didn't already do that turned up a real bug: the icon a page reports was **never recorded**. `on_favicon_urlchange` read CEF's list of icon URLs with `list.clone().into_iter()`, and cef-rs's clone of a borrowed string list copies the opaque list handle by value, so the copy is always empty. Every tab's `favicon` stayed `None`, and the sidebar fell back to D-025's per-site cache for every tab. That cache is what D-049–D-052 kept patching for Google's apps. The same bug made the extensions "install from folder" picker return nothing.
+
+**Decision.**
+- `clients::strings` reads a list CEF lends a callback by wrapping the same pointer again instead of cloning it. The icon callback and the extensions folder picker use it.
+- The sidebar shows, in order: the icon the tab's page reported (kept in `state.json`, so a tab that hasn't loaded since shows its page's last icon), then D-025's saved icon of its site or home site (for tabs that never loaded, e.g. after an Arc import), the site's `/favicon.ico`, a globe. When a tab moves to another site its recorded icon is cleared until the new page names its own.
+- The special cases of D-049–D-052 are gone: no per-app icon keys for Google's hosts, no sign-in-page rule, no "home site's icon first" rule. D-049's cookies on the lookup for never-loaded tabs stay. That isn't a special case; it makes the lookup see the page the user would see.
+- Cache version 5: saved site icons are looked up once more, and D-049's per-app files (`docs.google.com_spreadsheets.png`) are deleted.
+
+**Verified** on Linux/Xvfb: a tab's `favicon` is recorded when its page loads, changes when the tab navigates to another site (GitHub → rust-lang.org's `favicon.svg`), shows in the sidebar, and is still there after a restart. A page that names no usable icon (example.org's `data:,`) shows the globe.
