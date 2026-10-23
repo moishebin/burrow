@@ -313,11 +313,11 @@ pub const TOOLS: &[Tool] = &[
     },
     Tool {
         name: "sidebar",
-        description: "Get or change the sidebar: its width in pixels (200–600, the same as dragging its right edge) and whether it is shown. Change it only when the user asks. With no arguments, just reports.",
+        description: "Get or change the sidebar: its width in pixels (180–600, the same as dragging its right edge) and whether it is shown. Change it only when the user asks. With no arguments, just reports.",
         schema: || {
             object(
                 json!({
-                    "width": { "type": "integer", "minimum": 200, "maximum": 600, "description": "Default width is 264." },
+                    "width": { "type": "integer", "minimum": 180, "maximum": 600, "description": "Default width is 220." },
                     "visible": { "type": "boolean", "description": "false hides it to an edge strip (Ctrl+S)." }
                 }),
                 &[],

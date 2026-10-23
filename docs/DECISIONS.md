@@ -480,3 +480,15 @@ Done on the development machine while its screen was locked: no mouse, keyboard 
 - An agent's `show_bar` keeps the bar open for two seconds in both cases.
 
 **Verified on Windows** with a separate test copy and real cursor input (`SetCursorPos`/`mouse_event`): at rest the page shows; hovering the strip 1, 4 and 7 px below the window's top opens the bar; the bar stays open with the cursor on the drag area; dragging there moved a restored window, and pulled a maximized one out of maximized; moving into the page closes the bar. The drawn button glyphs of D-045 render on Windows. On Linux/Xvfb the bar still opens on hover; Xvfb has no window manager, so nothing moves windows there.
+
+## D-048 · A more compact sidebar, closer to Arc (2026-10-22)
+
+**Context.** Compared with Arc side by side, Burrow's sidebar was too wide, its favorite tiles too big, and the address box above the favorites took too much room. Arc's sidebar is about 200 px wide, with favorites three to a row as roughly 54×42 px tiles.
+
+**Decision.**
+- Sidebar: 220 px by default (was 264). The minimum is now 180 px (was 200), so it can be made narrower than Arc's. A width someone already chose stays as it is; double-clicking the edge resets it to the new default.
+- Favorites: tiles 40 px tall (was 46) with 18 px icons (was 20), at least 50 px wide (was 68), with 6 px gaps (was 7). At 220 px that is three to a row, about 63×40 px each.
+- Address box: 28 px tall (was 34) with 12 px text, and 10 px less space around it.
+- Agents: the `sidebar` tool takes 180–600 px.
+
+**Verified** on Linux/Xvfb with eight favorites: three to a row at 220 px, with the address box and space header fitting above the folders.

@@ -53,7 +53,7 @@ Priority: **P0** = needed to switch from Arc · P1 = soon after · P2 = later
 | Sleeping tabs: unload tabs out of sight (default 10 min, per-tab times, Sleep Now) | ✅ | D-040. Tabs playing media (also in embedded players from other sites), in picture in picture, in a call, or with typed text stay awake. Unit-tested; verified on Linux/Xvfb |
 | Keyboard shortcuts (see README) | ✅ | Verified with real keys on Xvfb: Ctrl+T/W/D/F, Ctrl+Shift+T, Esc |
 | Sidebar collapse (Ctrl+S) + hover the left edge to peek | ✅ | Verified with real input on Xvfb. A hidden sidebar used to leave no way back (reported in use, D-016). |
-| Resizable sidebar (drag the right edge) | ✅ | D-033. 200–600 px, saved; double-click resets. Verified with a real drag on Xvfb. Agent tool `sidebar`. |
+| Resizable sidebar (drag the right edge) | ✅ | D-033, D-048. 180–600 px (220 by default), saved; double-click resets. Verified with a real drag on Xvfb. Agent tool `sidebar`. |
 | Space colors, icons, rename, delete | ✅ | |
 | Search engine setting | ✅ | Default Google (D-011) |
 | Favicon cache on disk (show icons for never-loaded tabs offline) | ✅ | D-025 |

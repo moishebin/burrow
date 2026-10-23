@@ -1655,7 +1655,7 @@ function extensionsDialog() {
 // ---------------------------------------------------------------------------------------------
 // Resizing the sidebar by its right edge (D-033)
 
-const SIDEBAR_DEFAULT_WIDTH = 264;
+const SIDEBAR_DEFAULT_WIDTH = 220;
 const handle = $("resize-handle");
 let resizing = null; // { x, width, last, frame } while dragging
 handle.addEventListener("pointerdown", (e) => {

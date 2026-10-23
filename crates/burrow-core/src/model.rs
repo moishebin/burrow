@@ -121,8 +121,8 @@ fn default_sleep_minutes() -> u32 {
     SLEEP_MINUTES_DEFAULT
 }
 
-pub const SIDEBAR_WIDTH_DEFAULT: u32 = 264;
-pub const SIDEBAR_WIDTH_MIN: u32 = 200;
+pub const SIDEBAR_WIDTH_DEFAULT: u32 = 220;
+pub const SIDEBAR_WIDTH_MIN: u32 = 180;
 pub const SIDEBAR_WIDTH_MAX: u32 = 600;
 
 fn default_sidebar_width() -> u32 {

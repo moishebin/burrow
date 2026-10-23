@@ -2,7 +2,7 @@
 
 pub const APP_NAME: &str = "Burrow";
 /// Sidebar width in DIPs.
-pub const SIDEBAR_WIDTH: i32 = 264;
+pub const SIDEBAR_WIDTH: i32 = 220;
 /// Width of the hidden sidebar's edge strip; hovering it slides the sidebar out (Arc-style).
 pub const SIDEBAR_COLLAPSED_WIDTH: i32 = 10;
 /// Gap around the content card, in DIPs.

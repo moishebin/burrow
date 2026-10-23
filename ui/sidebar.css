@@ -37,8 +37,8 @@ svg { display: block; flex: none; }
 
 /* ---- address ---- */
 #address {
-  display: flex; align-items: center; gap: 6px; margin: 6px 0 10px; height: 34px; padding: 0 10px;
-  background: var(--tile); border-radius: 10px;
+  display: flex; align-items: center; gap: 6px; margin: 2px 0 8px; height: 28px; padding: 0 8px;
+  background: var(--tile); border-radius: 8px; font-size: 12px;
 }
 #address:hover { background: var(--hover); }
 #address:focus-within { background: var(--active); box-shadow: var(--shadow); }
@@ -51,14 +51,14 @@ svg { display: block; flex: none; }
 .lock.on { display: block; }
 
 /* ---- favorites ---- */
-#favorites { display: grid; grid-template-columns: repeat(auto-fill, minmax(68px, 1fr)); gap: 7px; margin-bottom: 12px; min-height: 4px; }
+#favorites { display: grid; grid-template-columns: repeat(auto-fill, minmax(50px, 1fr)); gap: 6px; margin-bottom: 10px; min-height: 4px; }
 #favorites:empty { margin-bottom: 4px; }
 .fav {
-  height: 46px; border-radius: 10px; background: var(--tile); display: grid; place-items: center; position: relative;
+  height: 40px; border-radius: 9px; background: var(--tile); display: grid; place-items: center; position: relative;
 }
 .fav:hover { background: var(--hover); }
 .fav.active { background: var(--active); box-shadow: var(--shadow); }
-.fav .favicon { width: 20px; height: 20px; }
+.fav .favicon { width: 18px; height: 18px; }
 .fav.live::after {
   content: ""; position: absolute; bottom: 5px; width: 4px; height: 4px; border-radius: 2px; background: var(--ink-soft);
 }
