@@ -448,3 +448,9 @@ Done on the development machine while its screen was locked: no mouse, keyboard 
 - **Picture in picture (D-036).** The "Picture in picture" window opened next to Burrow's window.
 - **Notifications (D-042).** Chromium alone dropped them; with D-042 the toast reached Windows.
 - **Not checked here:** hovering the window buttons (D-035), dragging and resizing the frameless window, the split view divider and dialogs with real input; they were verified on Linux/Xvfb.
+
+## D-044 · Release 0.0.3 (2026-10-22)
+
+**Contents.** D-032–D-043 (Chrome extensions and their badges, resizable sidebar and split view, performance, the new window corner, picture in picture, auto-update, dialogs over the window, sleeping tabs, website notifications). The same downloads as 0.0.2 (D-031). Not signed (D-030).
+
+**Upgrading.** 0.0.2 has no update check (D-037 came later), so 0.0.2 installs need the setup once; from 0.0.3 on, updates come by themselves. On the development machine, the installed 0.0.2 was upgraded with `setup /S /RELAUNCH /D=<its folder>`: it closed gracefully, the exe reports 0.0.3, and Burrow started again. Note for scripts: PowerShell's `Start-Process -Wait` on the setup doesn't return after `/RELAUNCH`, because it also waits for the Burrow the setup starts.
