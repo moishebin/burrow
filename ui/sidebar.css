@@ -179,6 +179,11 @@ svg { display: block; flex: none; }
 #dialog .buttons { display: flex; justify-content: flex-end; gap: 6px; margin-top: 4px; }
 #dialog .btn { padding: 6px 12px; border-radius: 8px; background: rgba(0, 0, 0, 0.06); }
 #dialog .btn.primary { background: var(--drop); color: #fff; }
+#dialog.site { min-width: 260px; }
+#dialog .zoom-row { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--ink-soft); }
+#dialog .zoom-row .btn { min-width: 30px; padding: 4px 8px; }
+#dialog .zoom-row .pct { min-width: 54px; color: var(--ink); }
+#dialog .btn.item { text-align: left; }
 #dialog .emoji-row { display: flex; flex-wrap: wrap; gap: 4px; }
 #dialog .emoji-row button { width: 28px; height: 28px; border-radius: 7px; font-size: 15px; }
 #dialog .emoji-row button.on { background: rgba(79, 70, 229, 0.15); }

@@ -1,11 +1,12 @@
-//! The top bar of the frameless window (D-035, D-045, D-047): the page's address on the left and
-//! minimize, maximize and close on the right, as in Arc on Windows. It stays out of sight until
+//! The top bar of the frameless window (D-035, D-045, D-047, D-051): the page's site in the middle,
+//! between a copy-link and a site-controls button, and minimize, maximize and close on the right,
+//! as in Arc on Windows. It stays out of sight until
 //! the mouse goes to the top: at rest it is only the strip above the content card, painted the
 //! window's color. With the mouse anywhere along that strip, the bar opens across the whole card
 //! and pushes the page down by its height, so it never covers the page.
 //!
-//! The address and the buttons are two window overlays. Between them is the window itself, which
-//! is a drag area for moving the window: an overlay is its own native child window on Windows, so
+//! The site and the window buttons are two window overlays. Around the site is the window itself,
+//! which is a drag area for moving the window: an overlay is its own native child window on Windows, so
 //! the window's drag areas don't reach under one. Over a drag area the views don't see the mouse,
 //! so on Windows Burrow follows the cursor itself to open and close the bar; elsewhere it uses the
 //! overlays' hover and the bar has no drag area.
@@ -18,9 +19,15 @@ use crate::{consts, task, views};
 pub const BUTTON_MINIMIZE: i32 = 101;
 pub const BUTTON_MAXIMIZE: i32 = 102;
 pub const BUTTON_CLOSE: i32 = 103;
-/// The address on the left of the bar; clicking it copies the link.
+/// The site in the middle of the bar; clicking it opens the address box.
 pub const BAR_URL: i32 = 104;
-const IDS: [i32; 4] = [BAR_URL, BUTTON_MINIMIZE, BUTTON_MAXIMIZE, BUTTON_CLOSE];
+/// Left of the site: copies the link.
+pub const BAR_LINK: i32 = 105;
+/// Right of the site: the site's controls (zoom, Boost, …).
+pub const BAR_SITE: i32 = 106;
+/// The site's part of the bar, in the order shown, then the window buttons.
+const IDS: [i32; 6] = [BAR_LINK, BAR_URL, BAR_SITE, BUTTON_MINIMIZE, BUTTON_MAXIMIZE, BUTTON_CLOSE];
+const SITE_PARTS: usize = 3;
 
 const BUTTON_WIDTH: i32 = 46;
 const BUTTONS_WIDTH: i32 = BUTTON_WIDTH * 3;
@@ -35,23 +42,24 @@ const INK: u32 = 0xFF1F1D2B;
 /// The address and the glyphs at rest: quieter than the page, dark again on hover.
 const INK_SOFT: u32 = 0xFF5F5B6E;
 const WHITE: u32 = 0xFFFFFFFF;
-/// Space before the address, from the card's left edge.
-const URL_PAD: i32 = 10;
+/// Width of the copy-link and site-controls buttons.
+const ICON_WIDTH: i32 = 30;
 #[cfg(target_os = "windows")]
 const FONT: &str = "Segoe UI, 12px";
 #[cfg(not(target_os = "windows"))]
 const FONT: &str = "Sans, 12px";
-/// Roughly how wide one character of the address is, to shorten it before it reaches the buttons.
+/// Roughly how wide one character of the site is, to shorten it before it reaches the buttons.
 const CHAR_WIDTH: i32 = 7;
 
 pub(super) struct WindowButtons {
-    /// The address; at rest, the whole strip above the card.
+    /// The site; at rest, the whole strip above the card.
     left: OverlayController,
+    left_layout: Option<BoxLayout>,
     /// Minimize, maximize and close.
     right: OverlayController,
-    /// In `IDS` order: the address, then the three buttons.
+    /// In `IDS` order: the site's three parts, then the window buttons.
     buttons: Vec<LabelButton>,
-    hovered: [bool; 4],
+    hovered: [bool; 6],
     open: bool,
     /// Bumped on every hover change; a pending hide only runs if nothing happened since.
     generation: u64,
@@ -67,11 +75,33 @@ enum Glyph {
     Maximize,
     Restore,
     Close,
+    /// A chain link (copy link), 14×14.
+    Link,
+    /// Two sliders (site controls), 14×14.
+    Sliders,
 }
 
-/// Whether a point (in 10×10 logical pixels) is inked in a caption glyph, Windows-style with a
-/// one-pixel stroke.
+impl Glyph {
+    /// Logical size: caption glyphs are 10 px, the site's icons 14.
+    fn size(self) -> i32 {
+        match self {
+            Glyph::Link | Glyph::Sliders => 14,
+            _ => 10,
+        }
+    }
+}
+
+/// Distance from (x, y) to the segment (ax, ay)–(bx, by).
+fn to_segment(x: f32, y: f32, (ax, ay): (f32, f32), (bx, by): (f32, f32)) -> f32 {
+    let (dx, dy) = (bx - ax, by - ay);
+    let t = (((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)).clamp(0.0, 1.0);
+    ((x - ax - t * dx).powi(2) + (y - ay - t * dy).powi(2)).sqrt()
+}
+
+/// Whether a point (in the glyph's logical pixels) is inked. Caption glyphs are Windows-style
+/// with a one-pixel stroke; the site's icons are line icons with a 1.3 px stroke.
 fn inked(g: Glyph, x: f32, y: f32) -> bool {
+    const HALF: f32 = 0.65;
     let outline = |x0: f32, y0: f32, x1: f32, y1: f32| {
         (x0..=x1).contains(&x) && (y0..=y1).contains(&y) && !(x > x0 + 1.0 && x < x1 - 1.0 && y > y0 + 1.0 && y < y1 - 1.0)
     };
@@ -85,6 +115,17 @@ fn inked(g: Glyph, x: f32, y: f32) -> bool {
         }
         // Within half a stroke of either diagonal.
         Glyph::Close => (x - y).abs() <= 0.75 || (x + y - 10.0).abs() <= 0.75,
+        // A rounded link, open at the top and bottom middle, with a bar across.
+        Glyph::Link => {
+            let ring = (to_segment(x, y, (4.0, 7.0), (10.0, 7.0)) - 3.2).abs() <= HALF;
+            let gap = (x - 7.0).abs() < 1.6 && (y - 7.0).abs() > 1.5;
+            (ring && !gap) || to_segment(x, y, (4.6, 7.0), (9.4, 7.0)) <= HALF
+        }
+        // Two rails, each with a ring for its knob.
+        Glyph::Sliders => [(4.0, 9.0), (10.0, 5.0)].iter().any(|&(y0, knob): &(f32, f32)| {
+            let r = ((x - knob).powi(2) + (y - y0).powi(2)).sqrt();
+            (r - 2.0).abs() <= HALF || (to_segment(x, y, (1.0, y0), (13.0, y0)) <= HALF && r > 2.0)
+        }),
     }
 }
 
@@ -94,7 +135,7 @@ fn glyph_image(g: Glyph, color: u32) -> Option<Image> {
     let image = image_create()?;
     let [_, r, gr, b] = color.to_be_bytes();
     for scale in [1, 2] {
-        let size = 10 * scale;
+        let size = g.size() * scale;
         let mut pixels = Vec::with_capacity((size * size * 4) as usize);
         for py in 0..size {
             for px in 0..size {
@@ -117,6 +158,8 @@ fn glyph_image(g: Glyph, color: u32) -> Option<Image> {
 
 fn glyph(id: i32, maximized: bool) -> Glyph {
     match id {
+        BAR_LINK => Glyph::Link,
+        BAR_SITE => Glyph::Sliders,
         BUTTON_MINIMIZE => Glyph::Minimize,
         BUTTON_MAXIMIZE if maximized => Glyph::Restore,
         BUTTON_MAXIMIZE => Glyph::Maximize,
@@ -130,11 +173,12 @@ fn darken(c: u32, amount: f32) -> u32 {
     0xFF00_0000 | ch(16) | ch(8) | ch(0)
 }
 
-/// The address as the bar shows it: without the scheme, `www.` or a lone trailing slash.
-fn display_url(url: &str) -> &str {
-    let s = url.split_once("://").map_or(url, |(_, rest)| rest);
-    let s = s.strip_prefix("www.").unwrap_or(s);
-    s.strip_suffix('/').unwrap_or(s)
+/// The site as the bar shows it: the host without `www.`, or the address for pages without one.
+fn display_site(url: &str) -> &str {
+    let Some((_, rest)) = url.split_once("://") else { return url };
+    let host = rest.split(['/', '?', '#']).next().unwrap_or(rest);
+    let host = host.strip_prefix("www.").unwrap_or(host);
+    if host.is_empty() { rest } else { host }
 }
 
 /// Shortens `url` to at most `max` characters, ending in an ellipsis.
@@ -147,11 +191,12 @@ fn shorten(url: &str, max: usize) -> String {
     s
 }
 
-/// A horizontal panel for an overlay.
+/// A horizontal panel for an overlay, its children centered along it.
 fn row() -> Option<(Panel, Option<BoxLayout>)> {
     let panel = panel_create(None)?;
     let layout = panel.set_to_box_layout(Some(&BoxLayoutSettings {
         horizontal: 1,
+        main_axis_alignment: AxisAlignment::CENTER,
         cross_axis_alignment: AxisAlignment::STRETCH,
         ..Default::default()
     }));
@@ -166,41 +211,40 @@ impl Burrow {
         }
         let window = self.window.clone()?;
         let (left_panel, left_layout) = row()?;
-        left_panel.set_insets(Some(&Insets { top: 0, left: URL_PAD, bottom: 0, right: 0 }));
         let (right_panel, _) = row()?;
         let mut buttons = Vec::new();
-        for id in IDS {
+        for (i, id) in IDS.into_iter().enumerate() {
             let mut delegate = views::WindowButtonDelegate::new();
             let b = label_button_create(Some(&mut delegate), Some(&cef("")))?;
             View::from(&b).set_id(id);
             View::from(&b).set_focusable(0);
             b.set_tooltip_text(Some(&cef(match id {
-                BAR_URL => "Copy link",
+                BAR_LINK => "Copy link",
+                BAR_URL => "Edit address",
+                BAR_SITE => "Site controls",
                 BUTTON_MINIMIZE => "Minimize",
                 BUTTON_MAXIMIZE => "Maximize",
                 _ => "Close",
             })));
+            b.set_horizontal_alignment(HorizontalAlignment::CENTER);
             if id == BAR_URL {
-                b.set_horizontal_alignment(HorizontalAlignment::LEFT);
                 b.set_font_list(Some(&cef(FONT)));
-                left_panel.add_child_view(Some(&mut View::from(&b)));
-                if let Some(l) = &left_layout {
-                    l.set_flex_for_view(Some(&mut View::from(&b)), 1);
-                }
             } else {
-                b.set_horizontal_alignment(HorizontalAlignment::CENTER);
-                b.set_minimum_size(Some(&Size { width: BUTTON_WIDTH, height: BAR_HEIGHT }));
-                right_panel.add_child_view(Some(&mut View::from(&b)));
+                let width = if i < SITE_PARTS { ICON_WIDTH } else { BUTTON_WIDTH };
+                b.set_minimum_size(Some(&Size { width, height: BAR_HEIGHT }));
             }
+            let panel = if i < SITE_PARTS { &left_panel } else { &right_panel };
+            panel.add_child_view(Some(&mut View::from(&b)));
             buttons.push(b);
         }
         let left = window.add_overlay_view(Some(&mut View::from(&left_panel)), DockingMode::CUSTOM, 0)?;
         let right = window.add_overlay_view(Some(&mut View::from(&right_panel)), DockingMode::CUSTOM, 0)?;
         self.window_buttons = Some(WindowButtons {
             left,
+            left_layout,
             right,
             buttons,
-            hovered: [false; 4],
+            hovered: [false; 6],
             open: false,
             generation: 0,
             away_ms: 0,
@@ -236,30 +280,32 @@ impl Burrow {
         let card = content.bounds();
         let width = card.width + consts::CARD_MARGIN;
         let url_room = width - BUTTONS_WIDTH;
-        let url = wb.buttons[0].clone();
-        let text = display_url(self.state.active_tab().map_or("", |t| t.url.as_str()));
-        let room = (url_room - URL_PAD - 24) / CHAR_WIDTH;
-        url.set_text(Some(&cef(&if open { shorten(text, room.max(1) as usize) } else { String::new() })));
-        url.set_enabled_text_colors(if wb.hovered[0] { INK } else { INK_SOFT });
-        View::from(&url).set_background_color(base);
+        let tab = self.state.active_tab().filter(|_| open);
+        let url = &wb.buttons[1];
+        let text = display_site(tab.map_or("", |t| t.url.as_str()));
+        let room = (url_room - 2 * ICON_WIDTH - 24) / CHAR_WIDTH;
+        url.set_text(Some(&cef(&shorten(text, room.max(1) as usize))));
+        url.set_enabled_text_colors(if wb.hovered[1] { INK } else { INK_SOFT });
+        // At rest the empty site fills the strip, so hovering it opens the bar (where Burrow
+        // doesn't follow the cursor). The icons only show for a page.
+        for (i, b) in wb.buttons[..SITE_PARTS].iter().enumerate() {
+            View::from(b).set_visible((IDS[i] == BAR_URL || tab.is_some()) as i32);
+        }
+        if let Some(l) = &wb.left_layout {
+            l.set_flex_for_view(Some(&mut View::from(url)), (!open) as i32);
+        }
         if let Some(panel) = wb.left.contents_view() {
             panel.set_background_color(base);
         }
         if open {
-            // Only as wide as the address where the rest of the bar moves the window.
-            let left_width = if cursor_screen_point().is_some() {
-                (URL_PAD + View::from(&url).preferred_size().width).min(url_room)
-            } else {
-                url_room
-            };
-            wb.left.set_bounds(Some(&Rect { x: card.x, y: 0, width: left_width, height: BAR_HEIGHT }));
+            wb.left.set_bounds(Some(&self.top_bar_site_rect(url_room)));
             wb.right.set_bounds(Some(&Rect { x: card.x + url_room, y: 0, width: BUTTONS_WIDTH, height: BAR_HEIGHT }));
         } else {
             wb.left.set_bounds(Some(&Rect { x: card.x, y: 0, width, height: consts::CARD_MARGIN }));
         }
 
         let maximized = self.window.as_ref().is_some_and(|w| w.is_maximized() != 0);
-        for (i, b) in wb.buttons.iter().enumerate().skip(1) {
+        for (i, b) in wb.buttons.iter().enumerate() {
             let id = IDS[i];
             let hovered = wb.hovered[i];
             let (bg, ink) = match (id, hovered) {
@@ -267,6 +313,11 @@ impl Burrow {
                 (_, true) => (darken(base, 0.08), INK),
                 _ => (base, INK_SOFT),
             };
+            if id == BAR_URL {
+                // Only its text darkens on hover, like a link.
+                View::from(b).set_background_color(base);
+                continue;
+            }
             View::from(b).set_background_color(bg);
             let mut image = glyph_image(glyph(id, maximized), ink);
             for state in [ButtonState::NORMAL, ButtonState::HOVERED, ButtonState::PRESSED] {
@@ -283,7 +334,9 @@ impl Burrow {
 
     pub fn window_button(&mut self, id: i32) {
         match id {
-            BAR_URL => self.shortcut(super::Shortcut::CopyUrl),
+            BAR_LINK => self.shortcut(super::Shortcut::CopyUrl),
+            BAR_URL => self.shortcut(super::Shortcut::FocusAddress),
+            BAR_SITE => self.open_site_controls(),
             BUTTON_MINIMIZE => self.act(super::Act::WindowMinimize),
             BUTTON_MAXIMIZE => self.act(super::Act::WindowMaximize),
             BUTTON_CLOSE => self.act(super::Act::WindowClose),
@@ -308,6 +361,13 @@ impl Burrow {
             }
         }
         self.layout_window_buttons();
+    }
+
+    /// The site controls (D-051): a dialog for the shown page's site, from the bar's sliders.
+    pub(super) fn open_site_controls(&mut self) {
+        if let Some(url) = self.state.active_tab().map(|t| t.url.clone()) {
+            self.open_dialog("site", &serde_json::json!([url]));
+        }
     }
 
     /// Opens or closes the bar by where the cursor is: over the strip above the card, or over the
@@ -340,16 +400,42 @@ impl Burrow {
         }
     }
 
-    /// The open bar's drag area in window coordinates: between the address and the buttons.
-    pub(super) fn top_bar_drag_rect(&self) -> Option<Rect> {
-        if !self.top_bar_open() || cursor_screen_point().is_none() {
-            return None;
+    /// The site's overlay while the bar is open: centered over the card, as wide as the site and
+    /// its two buttons, where Burrow follows the cursor (the rest of the bar moves the window).
+    /// Elsewhere it spans the bar up to the window buttons, so hovering anywhere keeps it open,
+    /// and its row centers the site.
+    fn top_bar_site_rect(&self, url_room: i32) -> Rect {
+        let card = View::from(&self.content).bounds();
+        let full = Rect { x: card.x, y: 0, width: url_room, height: BAR_HEIGHT };
+        let Some(wb) = &self.window_buttons else { return full };
+        if cursor_screen_point().is_none() {
+            return full;
         }
-        let wb = self.window_buttons.as_ref()?;
+        let width = wb.buttons[..SITE_PARTS]
+            .iter()
+            .filter(|b| View::from(*b).is_visible() != 0)
+            .map(|b| View::from(b).preferred_size().width)
+            .sum::<i32>()
+            .clamp(1, url_room);
+        // Centered on the card, but never over the window buttons.
+        let x = (card.x + (card.width - width) / 2).min(card.x + url_room - width).max(card.x);
+        Rect { x, y: 0, width, height: BAR_HEIGHT }
+    }
+
+    /// The open bar's drag areas in window coordinates: on both sides of the site.
+    pub(super) fn top_bar_drag_rects(&self) -> Vec<Rect> {
+        if !self.top_bar_open() || cursor_screen_point().is_none() {
+            return vec![];
+        }
         let card = View::from(&self.content).bounds();
         let url_room = card.width + consts::CARD_MARGIN - BUTTONS_WIDTH;
-        let text = (URL_PAD + View::from(&wb.buttons[0]).preferred_size().width).min(url_room);
-        Some(Rect { x: card.x + text, y: 0, width: (url_room - text).max(0), height: BAR_HEIGHT })
+        let site = self.top_bar_site_rect(url_room);
+        let end = card.x + url_room;
+        [(card.x, site.x), (site.x + site.width, end)]
+            .into_iter()
+            .filter(|(a, b)| b > a)
+            .map(|(a, b)| Rect { x: a, y: 0, width: b - a, height: BAR_HEIGHT })
+            .collect()
     }
 
     /// Whether the top bar is open (hovered, or shown by an agent).

@@ -1401,6 +1401,42 @@ function boostDialog(host) {
   });
 }
 
+// Site controls (D-051), from the sliders in the top bar: zoom and the site's own settings.
+function siteDialog(url) {
+  const host = hostOf(url) || url;
+  openDialog((d) => {
+    d.classList.add("site");
+    d.append(el("h2", null, host));
+    const zoom = el("div", "zoom-row");
+    const minus = el("button", "btn", "−");
+    const pct = el("button", "btn pct");
+    const plus = el("button", "btn", "+");
+    pct.title = "Reset to 100%";
+    minus.onclick = () => act("zoom", { dir: -1 });
+    plus.onclick = () => act("zoom", { dir: 1 });
+    pct.onclick = () => act("zoom", { dir: 0 });
+    zoom.append(el("span", "grow", "Zoom"), minus, pct, plus);
+    d.append(zoom);
+    dialogRefresh = () => (pct.textContent = `${view.zoom}%`);
+    dialogRefresh();
+    const item = (label, action) => {
+      const b = el("button", "btn item", label);
+      b.onclick = action;
+      d.append(b);
+    };
+    item("Copy Link", () => (copy(url), closeDialog()));
+    if (/^https?:/.test(url)) {
+      item(view.state.boosts[host] ? "Edit Boost…" : "Boost This Site…", () => boostDialog(host));
+      item("Send This Site to a Space…", () => atcDialog(host));
+    }
+    const row = el("div", "buttons");
+    const done = el("button", "btn primary", "Done");
+    done.onclick = closeDialog;
+    row.append(done);
+    d.append(row);
+  });
+}
+
 function timeAgo(ms) {
   const m = Math.round((Date.now() - ms) / 60000);
   if (m < 1) return "now";
@@ -1815,7 +1851,7 @@ const DIALOGS = {
   archive: archiveDialog, update: updateDialog, newSpace: newSpaceDialog, renameSpace: renameSpaceDialog,
   icon: iconDialog, deleteSpace: deleteSpaceDialog, importArc: importArcDialog, search: searchDialog,
   shortcuts: shortcutsDialog, downloads: downloadsDialog, atc: atcDialog, peek: peekDialog, boost: boostDialog,
-  history: historyDialog, extensions: extensionsDialog,
+  history: historyDialog, extensions: extensionsDialog, site: siteDialog,
 };
 const encodeArg = (a) => (a && typeof a === "object" && a.id ? { space_id: a.id } : a);
 function decodeArg(a) {

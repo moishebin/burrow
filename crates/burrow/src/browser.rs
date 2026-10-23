@@ -323,6 +323,8 @@ enum Act {
     ExpandPeek,
     /// Reset the shown tab's zoom to 100%.
     ResetZoom,
+    /// Zoom the shown tab one step in (1) or out (-1), or back to 100% (0), like Ctrl+Plus/Minus/0.
+    Zoom { dir: i32 },
     /// Custom CSS for a host ("Boost"); empty removes it.
     SetBoost { host: String, css: String },
     Print,
@@ -775,6 +777,13 @@ impl Burrow {
                 self.state.settings.peek_new_tabs = new_tabs;
                 self.state.settings.peek_from_pinned = from_pinned;
                 self.changed();
+            }
+            Act::Zoom { dir } => {
+                self.shortcut(Shortcut::Zoom(dir.signum()));
+                // Chromium applies zoom a moment later; then show the new level (site controls).
+                task::post_ui_delayed(100, || {
+                    with(|b| b.push_state());
+                });
             }
             Act::ClosePeek => self.close_peek(),
             Act::ExpandPeek => self.expand_peek(),
@@ -1273,7 +1282,7 @@ impl Burrow {
                 draggable: 1,
             });
         }
-        if let Some(bounds) = self.top_bar_drag_rect() {
+        for bounds in self.top_bar_drag_rects() {
             regions.push(DraggableRegion { bounds, draggable: 1 });
         }
         w.set_draggable_regions(Some(&regions));

@@ -532,3 +532,15 @@ Done on the development machine while its screen was locked: no mouse, keyboard 
 - The minimize, maximize and close glyphs are soft gray at rest and dark on hover, over a lighter hover shade (8 % instead of 12 %). Close still turns red.
 
 **Verified** on Linux/Xvfb with `window show_bar`: the bar shows `example.com` in the smaller gray font with space before it, and the buttons are quieter. The Windows look is not yet checked by hand.
+
+## D-051 · The site in the middle of the top bar, with site controls (2026-10-22)
+
+**Context.** Even after D-050, the bar should look like Arc's: the site centered, with a link icon on its left and a sliders icon on its right (a screenshot of Arc's bar was given).
+
+**Decision.**
+- The open bar shows a centered group: a **link icon** (copies the link, like Ctrl+Shift+C), the **site** (the host without `www.`, or the whole address for pages without a host; clicking it opens the address box, like Ctrl+L), and a **sliders icon** (site controls). Both icons are drawn in code like the caption glyphs (14 px line icons), soft gray, dark on hover. The site's text only darkens on hover, with no box behind it.
+- The window is dragged by the bar on **both sides** of the group (`top_bar_drag_rects`), where Burrow follows the cursor (Windows). Still two overlays, the site group and the window buttons, with the window showing through around them (D-047). On Linux the group's overlay spans the bar and centers its contents, and at rest the empty site button fills the strip so hovering it opens the bar.
+- **Site controls** is a dialog over the window (D-039) for the shown page: zoom −, the level (click to reset to 100%), +; Copy Link; Boost This Site… (Edit Boost… when there is one); Send This Site to a Space…. Zoom goes through a new sidebar act `zoom` (`dir` 1, -1, or 0 to reset), the same as Ctrl+Plus/Minus/0, which also remembers the level for the site.
+- Agents: no new tool. Everything in site controls already has one (`set_zoom`, `boost`, `air_traffic_control`), and copying the link is the agent reading the tab's URL.
+
+**Verified** on Linux/Xvfb with real mouse moves: hovering the top opens the bar with link icon, site and sliders centered over the card; the sliders open the site controls; + twice showed 120%, and clicking the level reset it to 100%. Dragging by both sides of the group is Windows-only and not yet checked there.
