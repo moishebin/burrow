@@ -79,3 +79,45 @@ Priority: **P0** = needed to switch from Arc · P1 = soon after · P2 = later
 | macOS / Linux packages | 🟡 | Linux `.tar.gz` since 0.0.1 (D-020). macOS needs a Mac to build (app bundle, signing). |
 | Sync between machines | 💤 | |
 | Boosts / custom CSS | ✅ | CSS only (D-026); no per-site JavaScript |
+
+## Roadmap: planned next
+
+Not started unless marked. Roughly in order within each group. Anything an agent can't do yet gets its tool in the same change (D-028).
+
+### Next up
+
+| Feature | Notes |
+|---|---|
+| Check by hand on Windows | Frameless window drag/resize, default-browser registry, typing in dialogs, clicking a toast, Peek, the agent server, hovering the window buttons. |
+| Code-signed Windows builds | Stops SmartScreen warnings on install and auto-update. `BURROW_SIGN` is ready; needs a certificate. |
+| Media controls in the sidebar | Arc's mini player: play/pause, next, mute for the tab playing sound, shown even when you're in another tab or space. |
+| Clear browsing data, site settings | Per space: cookies and site data, cache, history; see and revoke camera/mic/notification permissions per site. |
+| Built-in password saving | Save and fill logins per space, without an extension. Today only password-manager extensions (D-032). |
+| Extension gaps | Context-menu items, keyboard shortcuts, auto-update of installed extensions, badges per space. |
+| Picture in picture for videos in iframes | Embedded players (e.g. YouTube embeds on other sites). |
+| Spellcheck suggestions | In the page context menu, with a language setting. |
+
+### Arc features still missing
+
+| Feature | Notes |
+|---|---|
+| Links from other apps in a card | Arc's Little Arc, but over the current window (no second window): a link from another app opens in a Peek-style card; keep it or send it to a space. |
+| Capture | Select part of a page, copy or save it as an image. |
+| Tab hover previews | A preview of a tab's page when hovering it in the sidebar. |
+| Boosts: Zap and scripts | Click elements to hide them for good; optional per-site JavaScript (D-026 left it out). |
+| Live folders | Folders that fill themselves, e.g. from an RSS feed or GitHub pull requests. |
+| Notes | Arc-style notes as pinned items in a space. |
+| Themes | Gradient space colors, light/dark per space, a grain option. |
+| AI helpers (optional, off by default) | Tidy Today tabs into folders, rename tabs to short titles, summarize a page or a link before opening it. Bring-your-own API key or a local model. |
+
+### Later
+
+| Feature | Notes |
+|---|---|
+| Reader mode | Clean text view of articles. |
+| Translate pages | No Google services (D-006), so needs another translation engine. |
+| Custom keyboard shortcuts | Rebind any shortcut. |
+| Sidebar on the right | Option. |
+| Built-in ad blocker | Was 💤; extensions (uBlock Origin Lite) cover it for now. |
+| Sync between machines | Spaces, pinned tabs, favorites, Boosts; was 💤. |
+| macOS build | Needs a Mac for the app bundle and signing. |
