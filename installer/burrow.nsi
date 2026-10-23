@@ -14,6 +14,8 @@ SetCompressor /SOLID lzma
 
 !define APP "Burrow"
 !define UNINST_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APP}"
+; PowerShell, 64-bit: the installer is 32-bit, and a 32-bit PowerShell can't see 64-bit processes.
+!define POWERSHELL '"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass'
 
 !ifdef SIGN
   ; Sign the setup and the uninstaller it writes (package.sh passes BURROW_SIGN).
@@ -37,6 +39,15 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
+!include "WordFunc.nsh"
+!include "LogicLib.nsh"
+
+; An existing install (D-056): its version, or "?" when it can't be told; empty when there is
+; none. Updating skips the folder page and keeps the installed folder.
+Var Installed
+Var WelcomeTitle
+Var WelcomeText
+Var NextLabel
 
 !define MUI_ICON "${ICON}"
 !define MUI_UNICON "${ICON}"
@@ -44,8 +55,11 @@ VIAddVersionKey "ProductVersion" "${VERSION}"
 ; Side panel on the welcome and finish pages (installer/make-art.py).
 !define MUI_WELCOMEFINISHPAGE_BITMAP "${__FILEDIR__}\welcome.bmp"
 
-!define MUI_WELCOMEPAGE_TEXT "This will install ${APP} ${VERSION} for your Windows account. No administrator rights are needed.$\r$\n$\r$\nIf ${APP} is already installed, it is updated and your spaces, tabs and logins are kept."
+!define MUI_WELCOMEPAGE_TITLE "$WelcomeTitle"
+!define MUI_WELCOMEPAGE_TEXT "$WelcomeText"
+!define MUI_PAGE_CUSTOMFUNCTION_SHOW WelcomeShow
 !insertmacro MUI_PAGE_WELCOME
+!define MUI_PAGE_CUSTOMFUNCTION_PRE SkipWhenInstalled
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !define MUI_FINISHPAGE_RUN "$INSTDIR\burrow.exe"
@@ -78,9 +92,8 @@ Function ${un}CloseBurrow
     MessageBox MB_OKCANCEL|MB_ICONINFORMATION "${APP} is running. Click OK to close it and continue. Your tabs are saved." /SD IDOK IDOK close
     Abort
   close:
-    ; The installer is 32-bit: a 32-bit PowerShell can't see a 64-bit process's Path, so use the
-    ; 64-bit one through Sysnative.
-    nsExec::Exec `"$WINDIR\Sysnative\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -Command "Get-Process burrow -ErrorAction SilentlyContinue | Where-Object { $$_.Path -eq '$INSTDIR\burrow.exe' } | ForEach-Object { [void]$$_.CloseMainWindow() }"`
+    ; The 64-bit PowerShell (see POWERSHELL), which can see the 64-bit burrow.exe's Path.
+    nsExec::Exec `${POWERSHELL} -Command "Get-Process burrow -ErrorAction SilentlyContinue | Where-Object { $$_.Path -eq '$INSTDIR\burrow.exe' } | ForEach-Object { [void]$$_.CloseMainWindow() }"`
     Pop $0
   wait:
     ; Up to 20 s for Burrow to save and quit.
@@ -99,6 +112,103 @@ FunctionEnd
 !macroend
 !insertmacro CLOSE_BURROW ""
 !insertmacro CLOSE_BURROW "un."
+
+; Running an old setup (e.g. one left in Downloads) shouldn't install an old Burrow (D-056): if
+; GitHub has a newer release, offer to download its setup (checked against the release's
+; checksums) and run that instead. Not in silent mode, which is how Burrow updates itself.
+Function OfferLatest
+  IfSilent done
+  InitPluginsDir
+  File "/oname=$PLUGINSDIR\latest.ps1" "${__FILEDIR__}\latest.ps1"
+  nsExec::ExecToStack `${POWERSHELL} -File "$PLUGINSDIR\latest.ps1" -Mode check`
+  Pop $0
+  Pop $1
+  ${If} $0 != 0
+  ${OrIf} $1 == ""
+    Return
+  ${EndIf}
+  ${VersionCompare} $1 "${VERSION}" $2
+  ${If} $2 != 1
+    Return
+  ${EndIf}
+  MessageBox MB_YESNO|MB_ICONINFORMATION "${APP} $1 is out, and this setup is the older ${VERSION}.$\r$\n$\r$\nDownload and install ${APP} $1 instead? (Recommended)" IDNO done
+  StrCpy $3 "$TEMP\burrow-$1-windows-x64-setup.exe"
+  Banner::show /NOUNLOAD "Downloading ${APP} $1…"
+  nsExec::ExecToStack `${POWERSHELL} -File "$PLUGINSDIR\latest.ps1" -Mode download -Version $1 -Out "$3"`
+  Pop $0
+  Pop $4
+  Banner::destroy
+  ${If} $0 == 0
+    Exec '"$3"'
+    Quit
+  ${EndIf}
+  MessageBox MB_OK|MB_ICONEXCLAMATION "${APP} $1 couldn't be downloaded. This setup will install ${VERSION}."
+  done:
+FunctionEnd
+
+Function .onInit
+  Call OfferLatest
+  ; InstallDirRegKey has already put the installed folder in $INSTDIR, if there is one.
+  ; The version is the installed burrow.exe's own (e.g. 0.0.4.0), else the uninstall entry's.
+  StrCpy $Installed ""
+  ${If} ${FileExists} "$INSTDIR\burrow.exe"
+    StrCpy $Installed "?"
+    ClearErrors
+    ${GetFileVersion} "$INSTDIR\burrow.exe" $0
+    ${If} ${Errors}
+      ReadRegStr $0 HKCU "${UNINST_KEY}" "DisplayVersion"
+    ${ElseIf} $0 == "0.0.0.0"
+      ReadRegStr $0 HKCU "${UNINST_KEY}" "DisplayVersion"
+    ${Else}
+      StrCpy $1 $0 "" -2
+      ${If} $1 == ".0"
+        StrCpy $0 $0 -2
+      ${EndIf}
+    ${EndIf}
+    ${If} $0 != ""
+      StrCpy $Installed $0
+    ${EndIf}
+  ${EndIf}
+
+  StrCpy $WelcomeTitle "Install ${APP} ${VERSION}"
+  StrCpy $WelcomeText "This will install ${APP} ${VERSION} for your Windows account. No administrator rights are needed."
+  StrCpy $NextLabel ""
+  ${If} $Installed == "?"
+    StrCpy $WelcomeTitle "Update ${APP}"
+    StrCpy $WelcomeText "${APP} is already installed in $INSTDIR.$\r$\n$\r$\nThis will update it to ${VERSION}. Your spaces, tabs and logins are kept."
+    StrCpy $NextLabel "&Update"
+  ${ElseIf} $Installed != ""
+    ${VersionCompare} $Installed "${VERSION}" $1
+    ${If} $1 == 2
+      StrCpy $WelcomeTitle "Update ${APP}"
+      StrCpy $WelcomeText "${APP} $Installed is installed.$\r$\n$\r$\nThis will update it to ${VERSION}. Your spaces, tabs and logins are kept."
+      StrCpy $NextLabel "&Update"
+    ${ElseIf} $1 == 0
+      StrCpy $WelcomeTitle "${APP} ${VERSION} is installed"
+      StrCpy $WelcomeText "${APP} ${VERSION} is already installed in $INSTDIR.$\r$\n$\r$\nYou can install it again, for example to repair it. Your spaces, tabs and logins are kept."
+      StrCpy $NextLabel "&Reinstall"
+    ${Else}
+      StrCpy $WelcomeTitle "A newer ${APP} is installed"
+      StrCpy $WelcomeText "${APP} $Installed is installed, which is newer than this setup (${VERSION}).$\r$\n$\r$\nInstalling would replace it with the older version. Your spaces, tabs and logins are kept, but the older version may not read everything the newer one saved."
+      StrCpy $NextLabel "&Install ${VERSION}"
+    ${EndIf}
+  ${EndIf}
+FunctionEnd
+
+; Names the welcome page's button after what it will do.
+Function WelcomeShow
+  ${If} $NextLabel != ""
+    GetDlgItem $0 $HWNDPARENT 1
+    SendMessage $0 ${WM_SETTEXT} 0 "STR:$NextLabel"
+  ${EndIf}
+FunctionEnd
+
+; An update goes into the installed folder; only a new install asks where.
+Function SkipWhenInstalled
+  ${If} $Installed != ""
+    Abort
+  ${EndIf}
+FunctionEnd
 
 Function DesktopShortcut
   CreateShortcut "$DESKTOP\${APP}.lnk" "$INSTDIR\burrow.exe"

@@ -586,3 +586,28 @@ An 8 px "overhang" of maximized windows was suspected first and ruled out. `GetW
 **Upgrading.** Copies installed with the 0.0.3 setup update themselves (D-037).
 
 **Verified before publishing.** The Windows zip ran next to the owner's Burrow with a throwaway data folder: the window opened on its start page, the exe reports 0.0.4, and the agent CLI listed its tab.
+
+## D-056 · The setup knows what is installed, and offers the latest release (2026-10-22)
+
+**Problem (reported).** Running the setup over an installed Burrow looked like a fresh install (welcome page, then the folder page). Running an old setup left in Downloads (0.0.2) quietly replaced 0.0.4 with 0.0.2, which can't update itself.
+
+**Decision.**
+- **Detecting an install.** The setup looks in the folder the registry remembers for `burrow.exe` and reads its version from the file (else from the uninstall entry). Then:
+  - The installed copy is older: "Update Burrow", button **Update**.
+  - The same version: "Burrow X is installed", button **Reinstall**.
+  - The installed copy is newer: "A newer Burrow is installed", with a warning that the older version may not read everything the newer one saved; button **Install X**.
+
+  In all three cases the folder page is skipped and the installed folder is used. Only a new install asks where.
+- **Offering the latest.** Before that, the setup asks GitHub for the latest release (`installer/latest.ps1`, through the 64-bit PowerShell). If a newer one exists: "Burrow Y is out, and this setup is the older X. Download and install Burrow Y instead? (Recommended)". Yes downloads that release's setup to `%TEMP%`, checks it against the release's `SHA256SUMS.txt` (deleted if it doesn't match), runs it and quits. No, or a failed download, continues with this setup. Offline, the check fails quietly. Silent installs (`/S`, Burrow's own updater, D-037) skip the check.
+- Old setups (0.0.4 and earlier) don't have this; it starts with the next release.
+- **Version info fix.** `build.rs` only re-ran when the icon or `.rc` changed, so a version bump kept the old version in `burrow.exe`'s file properties (a 0.0.3 build reported 0.0.2). It now also re-runs when `CARGO_PKG_VERSION` changes. The setup's detection relies on that version.
+
+**Verified on Windows** against the installed 0.0.4, with test builds of the setup that write down what they detect and would show, then quit before any page appears (the screen was locked, so pages couldn't be captured):
+- A 0.0.3 setup offered 0.0.4 and, past that, would show "A newer Burrow is installed" with Install 0.0.3.
+- 0.0.4 offered nothing and would show Reinstall.
+- 0.0.5 would show Update.
+- All three used the installed folder.
+
+`latest.ps1` on its own: the check returned 0.0.4; the download of the 0.0.4 setup (130 MB, 7 s) matched the published checksum; a version not in the release returned "missing". The pages themselves (button labels, skipped folder page) are not yet seen on screen.
+
+**Also fixed by hand.** The owner's PC had 0.0.2 after running the old setup; the 0.0.4 setup was run silently into the same folder, and it reports 0.0.4 again.

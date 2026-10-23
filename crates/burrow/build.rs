@@ -3,6 +3,9 @@
 fn main() {
     println!("cargo::rerun-if-changed=resources/burrow.rc");
     println!("cargo::rerun-if-changed=resources/burrow.ico");
+    // The version info below comes from Cargo.toml; without this a version bump kept the old one
+    // (an installed 0.0.3 build reported 0.0.2).
+    println!("cargo::rerun-if-env-changed=CARGO_PKG_VERSION");
     if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
         // burrow.rc has VER_* placeholders; fill them in from Cargo.toml's version.
         let var = |k: &str| std::env::var(k).unwrap();
