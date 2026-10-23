@@ -27,27 +27,18 @@ pub fn icon_key(url: &str) -> Option<String> {
     Some(if first.is_empty() { host } else { format!("{host}/{first}") })
 }
 
-/// Google's own apps: their pages give Burrow only the generic Google icon (signed out, they send
-/// it to a sign-in page), so their product icons are built in (D-049).
-const GOOGLE_APPS: &[(&str, &str)] = &[
-    ("mail.google.com/mail", "gmail"),
-    ("mail.google.com/chat", "chat"),
-    ("chat.google.com", "chat"),
-    ("docs.google.com/spreadsheets", "sheets"),
-    ("docs.google.com/document", "docs"),
-    ("docs.google.com/presentation", "slides"),
-    ("docs.google.com/forms", "forms"),
-    ("voice.google.com", "voice"),
-    ("calendar.google.com", "calendar"),
-    ("drive.google.com", "drive"),
-    ("meet.google.com", "meet"),
-    ("keep.google.com", "keep"),
-];
-
-/// The built-in icon for an icon key, if it has one.
-pub fn known_icon(key: &str) -> Option<String> {
-    let (_, product) = GOOGLE_APPS.iter().find(|(k, _)| *k == key)?;
-    Some(format!("https://www.gstatic.com/images/branding/product/2x/{product}_2020q4_48dp.png"))
+/// Whether a URL looks like a sign-in page (`accounts.google.com`, `login.microsoftonline.com`,
+/// `…/signin`). An icon lookup that ends on one would save the sign-in page's icon (D-052).
+pub fn is_sign_in(url: &str) -> bool {
+    let host = links::host_of(url);
+    let first = host.split('.').next().unwrap_or("");
+    if matches!(first, "accounts" | "login" | "signin" | "auth" | "sso" | "id") {
+        return true;
+    }
+    let rest = url.split_once("://").map_or("", |(_, r)| r);
+    let path = rest.find('/').map_or("", |i| &rest[i..]).split(['?', '#']).next().unwrap_or("");
+    let path = path.to_ascii_lowercase();
+    ["login", "signin", "sign-in", "sign_in", "oauth", "authorize", "sso"].iter().any(|w| path.contains(w))
 }
 
 /// The key a cache file holds, from its name without `.png` (`file_name` turns `/` into `_`).
@@ -179,10 +170,17 @@ mod tests {
         assert_eq!(key_of_file("docs.google.com_spreadsheets"), "docs.google.com/spreadsheets");
         assert_eq!(key_of_file("mail.google.com"), "mail.google.com");
         assert_eq!(key_of_file("app.slack.com"), "app.slack.com");
-        let gmail = icon_key("https://mail.google.com/mail/u/1/#inbox").unwrap();
-        assert!(known_icon(&gmail).unwrap().ends_with("/gmail_2020q4_48dp.png"));
-        assert!(known_icon("voice.google.com").unwrap().contains("voice"));
-        assert_eq!(known_icon("github.com"), None);
+    }
+
+    #[test]
+    fn sign_in_pages_are_recognized() {
+        assert!(is_sign_in("https://accounts.google.com/v3/signin/identifier?continue=x"));
+        assert!(is_sign_in("https://login.microsoftonline.com/organizations/oauth2/v2.0/authorize?x"));
+        assert!(is_sign_in("https://app.slack.com/workspace-signin?redir=x"));
+        assert!(is_sign_in("https://github.com/login"));
+        assert!(!is_sign_in("https://chat.google.com/u/0/app/home"));
+        assert!(!is_sign_in("https://mail.google.com/mail/u/0/?flowName=GlifWebSignIn#inbox"));
+        assert!(!is_sign_in("https://workspace.google.com/intl/en-US/gmail/"));
     }
 
     #[test]

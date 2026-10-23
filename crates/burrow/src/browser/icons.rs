@@ -5,14 +5,14 @@
 //! fetches the tab's page in its space's profile (so signed-in apps answer as usual), reads the
 //! `<link rel=icon>` tags, and saves the best icon that downloads.
 //!
-//! Icons are kept per site, and per app on hosts with several apps (D-049).
+//! Icons are kept per site, and per app on hosts with several apps (D-049, D-052).
 
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     sync::{Arc, Mutex},
 };
 
-use burrow_core::{favicon, links, Id};
+use burrow_core::{favicon, Id};
 use cef::*;
 use serde::Serialize;
 
@@ -25,8 +25,10 @@ const PARALLEL: usize = 4;
 const MAX_PAGE_BYTES: usize = 512 * 1024;
 const ICON_PIXELS: u32 = 128;
 /// Bumped when icons saved by older versions should be looked up again. 2: lookups sent no
-/// cookies, so signed-in apps (Gmail, Google Voice) saved their sign-in page's icon (D-049).
-const CACHE_VERSION: &str = "2";
+/// cookies, so signed-in apps (Gmail, Google Voice) saved their sign-in page's icon. 3 and 4: Google's
+/// apps briefly had outdated icons built in, and redirects to another app host were skipped
+/// (D-049, D-052).
+const CACHE_VERSION: &str = "4";
 /// `URLRequest` flag: send the profile's cookies, so signed-in apps answer with their own page.
 const UR_FLAG_ALLOW_STORED_CREDENTIALS: i32 = 8;
 
@@ -105,7 +107,6 @@ impl Burrow {
     fn scan_icons(&mut self) {
         self.icons.scan_pending = false;
         let mut wanted: Vec<(String, String, Id)> = vec![];
-        let mut known: Vec<(String, String)> = vec![];
         for space in &self.state.spaces {
             for tab in space.tabs() {
                 let url = tab.home_url.as_deref().unwrap_or(&tab.url);
@@ -118,15 +119,8 @@ impl Burrow {
                     continue; // asked again once the profile is ready
                 }
                 self.icons.tried.insert(host.clone());
-                if let Some(icon) = favicon::known_icon(&host) {
-                    known.push((host, icon));
-                    continue;
-                }
                 wanted.push((host, url.to_string(), space.profile_id.clone()));
             }
-        }
-        for (host, icon) in known {
-            self.try_icons(host, VecDeque::from([icon]), false);
         }
         self.icons.queue.extend(wanted);
         self.pump_icons();
@@ -143,14 +137,14 @@ impl Burrow {
         }
     }
 
-    /// A page was fetched (or failed, with empty HTML): try its icons in order. A page that
-    /// sent Burrow to another site (a sign-in page) has that site's icon, so then only the asked
-    /// site's `/favicon.ico` is tried.
+    /// A page was fetched (or failed, with empty HTML): try its icons in order. A lookup that
+    /// ended on a sign-in page has that page's icon, so then only the asked site's
+    /// `/favicon.ico` is tried. Other redirects (Google Chat moving to its own host) are followed.
     fn on_page_fetched(&mut self, host: String, asked_url: String, page_url: String, html: String) {
-        let candidates = if links::host_of(&page_url) == links::host_of(&asked_url) {
-            favicon::candidates(&html, &page_url)
-        } else {
+        let candidates = if favicon::is_sign_in(&page_url) && !favicon::is_sign_in(&asked_url) {
             favicon::resolve(&asked_url, "/favicon.ico").into_iter().collect()
+        } else {
+            favicon::candidates(&html, &page_url)
         };
         self.try_icons(host, candidates.into(), true);
     }
@@ -163,11 +157,7 @@ impl Burrow {
         }
         self.icons.tried.insert(host.clone());
         let fallback = favicon::resolve(page_url, "/favicon.ico").unwrap_or_default();
-        let candidates = match favicon::known_icon(&host) {
-            Some(known) => VecDeque::from([known]),
-            None => VecDeque::from([icon_url, fallback]),
-        };
-        self.try_icons(host, candidates, false);
+        self.try_icons(host, VecDeque::from([icon_url, fallback]), false);
     }
 
     /// Downloads the first icon of `candidates` that works and saves it for `host`.

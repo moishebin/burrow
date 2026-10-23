@@ -544,3 +544,13 @@ Done on the development machine while its screen was locked: no mouse, keyboard 
 - Agents: no new tool. Everything in site controls already has one (`set_zoom`, `boost`, `air_traffic_control`), and copying the link is the agent reading the tab's URL.
 
 **Verified** on Linux/Xvfb with real mouse moves: hovering the top opens the bar with link icon, site and sliders centered over the card; the sliders open the site controls; + twice showed 120%, and clicking the level reset it to 100%. Dragging by both sides of the group is Windows-only and not yet checked there.
+
+## D-052 · Google's icons come from the sites, not a built-in table (2026-10-22)
+
+**Problem (reported).** After D-049, Gmail's favorite showed Google's old 2020 "M". D-049 had built in a table of Google product icon URLs (`gstatic.com/images/branding/product/2x/<app>_2020q4_48dp.png`), and the newest icons at a fixed address were the 2020 set. Google's apps now name 2026 icons in their pages, e.g. Gmail `favicon_gmail_2026_v2.ico` and Voice `voice_favicon_2026_v2.png`. Any such table goes stale.
+
+**Decision.**
+- The built-in table is gone; icons come only from the sites. A loaded page's own icon is saved as before (D-025). The lookup for tabs that haven't loaded sends the profile's cookies (D-049), so signed-in apps answer with their real page and icon.
+- D-049 skipped every lookup that ended on another site. That also skipped Google Chat, which moves from `mail.google.com/chat` to `chat.google.com`. Now only a lookup that ends on a sign-in page (`favicon::is_sign_in`: hosts like `accounts.`/`login.`, paths with `signin`/`login`/`oauth`) falls back to the asked site's `/favicon.ico`; other redirects are followed.
+- Cache version 4: icons saved by D-049's builds are looked up once more.
+- D-049's per-app keys (`SPLIT_HOSTS`) stay: they aren't icons, only which addresses share an icon.
