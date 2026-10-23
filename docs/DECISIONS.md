@@ -578,3 +578,11 @@ An 8 px "overhang" of maximized windows was suspected first and ruled out. `GetW
 - Cache version 5: saved site icons are looked up once more, and D-049's per-app files (`docs.google.com_spreadsheets.png`) are deleted.
 
 **Verified** on Linux/Xvfb: a tab's `favicon` is recorded when its page loads, changes when the tab navigates to another site (GitHub → rust-lang.org's `favicon.svg`), shows in the sidebar, and is still there after a restart. A page that names no usable icon (example.org's `data:,`) shows the globe.
+
+## D-055 · Release 0.0.4 (2026-10-22)
+
+**Contents.** D-045–D-054: the top bar (site centered between copy-link and site controls, drawn window buttons, drag to move the window, opens on every monitor), the hidden sidebar sliding out over the page, a more compact sidebar, and tab icons that are the page's own (which also fixes installing an extension from a folder). Same downloads as before (D-031). Not signed (D-030).
+
+**Upgrading.** Copies installed with the 0.0.3 setup update themselves (D-037).
+
+**Verified before publishing.** The Windows zip ran next to the owner's Burrow with a throwaway data folder: the window opened on its start page, the exe reports 0.0.4, and the agent CLI listed its tab.
